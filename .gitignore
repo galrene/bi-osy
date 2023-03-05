@@ -1,0 +1,28 @@
+# Ignore all
+*
+
+# Unignore all with extensions
+!*.*
+
+# Unignore all dirs
+!*/
+
+# Unignore Doxyfile
+!Doxyfile
+
+# Unignore Makefile
+!Makefile
+
+### Above combination will ignore all files without extension ###
+
+*.out
+# Ignore object files
+*.o
+# Ignore makefile dependencies
+*.d
+# Ignore build and built documentation
+build/
+doc/
+# Ignore Clion stuff
+.idea/
+cmake-build-*/
