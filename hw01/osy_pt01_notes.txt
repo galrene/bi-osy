@@ -1,0 +1,12 @@
+Notes:
+    Mame obmedzeny pocet ProgtestSolverov, kde kazdy ma urcitu kapacitu mnozstva problemov ktore vie vyriesit.
+    Plytvanim (vyuzivanim instancie solveru na male mnozstvo problemov) moze dojst k vyplytvaniu solverov pred
+    vyriesenim vsetkych problemov.
+
+    waitForPack IN comm vlakno asi najlepsie ked davkuje progtest solvery az kym nie su plne. vyzera, ze bude vyhodnejsie
+    plnit solvery po jednom (jeden pre vsetky worker vlakna)
+
+Peto advice:
+    Worker přijde, zamkne prob frontu, počká až není prázdná (conditional variable), vybere,
+    co může (dokud je co brát a dokud je solver neplný). Pokud je solver plný, tak se odemkne zámek
+    a spustim solve, pokud ne, tak jenom odemknu. Samo pak musíš ošetřit ukončení, aby se spustily i poloplné solvery
