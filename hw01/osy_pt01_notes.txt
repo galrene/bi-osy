@@ -10,3 +10,7 @@ Peto advice:
     Worker přijde, zamkne prob frontu, počká až není prázdná (conditional variable), vybere,
     co může (dokud je co brát a dokud je solver neplný). Pokud je solver plný, tak se odemkne zámek
     a spustim solve, pokud ne, tak jenom odemknu. Samo pak musíš ošetřit ukončení, aby se spustily i poloplné solvery
+
+TODO:
+    Identifikuj presne kto su producenti a kto konzumenti od hora dole.
+    Prejdi si slidy z prednasky 03.
