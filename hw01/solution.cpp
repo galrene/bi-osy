@@ -59,30 +59,49 @@ public:
 
     void addCompany(ACompany company);
 
-    void solve(void);
-
 private:
-    list<ACompany> m_Companies;
-    vector<thread> m_ThreadPool;
+    queue<ACompany> m_Companies;
+    mutex m_MtxComp;
+
+    queue<AProblemPack> m_PackReceived;
+    mutex m_MtxReceived;
+    queue<AProblemPack> m_PackReturn;
+    mutex m_MtxReturn;
+
+    vector<thread> m_Workers;
+    mutex m_MtxWorkerNoWork;
+    condition_variable m_CVWorker;
+
+    shared_ptr<CProgtestSolver> m_Solver;
+
+    void createWorker(void);
+    void worker ( void );
 };
 
-void COptimizer::solve(void) {}
-
-void COptimizer::start(int threadCount) {
-    for ( int i = 0; i < threadCount; i++ ) {
-        // m_ThreadPool.push_back()
-    }
+void COptimizer::worker ( void ) {
+    unique_lock lk (m_MtxWorkerNoWork);
+    m_CVWorker.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
 }
 
-void COptimizer::stop(void) {
+void COptimizer::createWorker ( void ) {
+    m_Workers.emplace_back ( &COptimizer::worker, this );
+}
+
+void COptimizer::start ( int threadCount ) {
+    createCommThreads();
+    for ( int i = 0; i < threadCount; i++ )
+        createWorker();
+}
+
+void COptimizer::stop ( void ) {
 
 }
 
 void COptimizer::addCompany(ACompany company) {
-    m_Companies.push_back( company );
+    lock_guard<mutex> lg ( m_MtxComp ); // unnecessary?
+    m_Companies.push( company );
 }
 
-// TODO: COptimizer implementation goes here
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 #ifndef __PROGTEST__
 
