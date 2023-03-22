@@ -43,6 +43,47 @@ using namespace std;
 
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
+class CCompanyWrapper {
+public:
+    CCompanyWrapper ( int threadCount );
+
+    void worker ( void );
+    void receiver ( void );
+    void returner ( void );
+
+private:
+    shared_ptr<CCompany> m_Company;
+    vector<thread> m_Workers;
+    thread m_ThrReceive;
+
+    thread m_ThrReturn;
+
+    condition_variable m_CVWorker;
+    mutex m_MtxWorkerNoWork;
+
+    mutex m_MtxReturnerNoWork;
+
+};
+
+void CCompanyWrapper::worker ( void ) {
+    unique_lock<mutex> lk (m_MtxWorkerNoWork);
+    m_CVWorker.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
+}
+
+void CCompanyWrapper::returner ( void ) {
+    unique_lock<mutex> lk ( m_MtxReturnerNoWork );
+    m_Receiver.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
+}
+
+void CCompanyWrapper::receiver ( void ) {
+
+}
+
+CCompanyWrapper::CCompanyWrapper ( int threadCount ) {
+    for ( int i = 0; i < threadCount; i++ )
+        m_Workers.emplace_back ( &CCompanyWrapper::worker, this );
+}
+
 class COptimizer {
 public:
     static bool usingProgtestSolver(void) {
@@ -61,44 +102,25 @@ public:
 
 private:
     queue<ACompany> m_Companies;
-    mutex m_MtxComp;
 
     queue<AProblemPack> m_PackReceived;
     mutex m_MtxReceived;
     queue<AProblemPack> m_PackReturn;
     mutex m_MtxReturn;
 
-    vector<thread> m_Workers;
-    mutex m_MtxWorkerNoWork;
-    condition_variable m_CVWorker;
-
     shared_ptr<CProgtestSolver> m_Solver;
 
-    void createWorker(void);
-    void worker ( void );
 };
 
-void COptimizer::worker ( void ) {
-    unique_lock lk (m_MtxWorkerNoWork);
-    m_CVWorker.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
-}
 
-void COptimizer::createWorker ( void ) {
-    m_Workers.emplace_back ( &COptimizer::worker, this );
-}
 
 void COptimizer::start ( int threadCount ) {
-    createCommThreads();
-    for ( int i = 0; i < threadCount; i++ )
-        createWorker();
 }
 
 void COptimizer::stop ( void ) {
-
 }
 
 void COptimizer::addCompany(ACompany company) {
-    lock_guard<mutex> lg ( m_MtxComp ); // unnecessary?
     m_Companies.push( company );
 }
 
