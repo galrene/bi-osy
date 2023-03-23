@@ -103,8 +103,6 @@ public:
 private:
     queue<ACompany> m_Companies;
 
-    queue<AProblemPack> m_PackReceived;
-    mutex m_MtxReceived;
     queue<AProblemPack> m_PackReturn;
     mutex m_MtxReturn;
 
