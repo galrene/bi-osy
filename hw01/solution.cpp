@@ -43,45 +43,53 @@ using namespace std;
 
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
-class CCompanyWrapper {
-public:
-    CCompanyWrapper ( int threadCount );
-
-    void worker ( void );
-    void receiver ( void );
-    void returner ( void );
-
+class CProblemPackWrapper {
 private:
-    shared_ptr<CCompany> m_Company;
-    vector<thread> m_Workers;
-    thread m_ThrReceive;
-
-    thread m_ThrReturn;
-
-    condition_variable m_CVWorker;
-    mutex m_MtxWorkerNoWork;
-
-    mutex m_MtxReturnerNoWork;
-
+    AProblemPack m_ProblemPack;
+public:
 };
 
-void CCompanyWrapper::worker ( void ) {
-    unique_lock<mutex> lk (m_MtxWorkerNoWork);
-    m_CVWorker.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
-}
+
+class CCompanyWrapper {
+public:
+    explicit CCompanyWrapper ( ACompany company )
+    : m_Company ( company ) {}
+
+    thread m_ThrReceive;
+    void receiver (void );
+
+    thread m_ThrReturn;
+    void returner ( void );
+
+    void startCompany ( void );
+
+private:
+    ACompany m_Company;
+
+    condition_variable m_CVReturner;
+    mutex m_MtxReturnerNoWork;
+
+    queue<CProblemPackWrapper> m_ProblemPacks;
+};
 
 void CCompanyWrapper::returner ( void ) {
     unique_lock<mutex> lk ( m_MtxReturnerNoWork );
-    m_Receiver.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
+    m_CVReturner.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
 }
 
 void CCompanyWrapper::receiver ( void ) {
-
+    while ( true ) {
+        AProblemPack problem = m_Company->waitForPack();
+        if (!problem)
+            break;
+        // iterate through problem in problem pack and fill the solver with them
+        m_ProblemPacks.push(problem);
+    }
 }
 
-CCompanyWrapper::CCompanyWrapper ( int threadCount ) {
-    for ( int i = 0; i < threadCount; i++ )
-        m_Workers.emplace_back ( &CCompanyWrapper::worker, this );
+void CCompanyWrapper::startCompany ( void ) {
+    m_ThrReceive = thread ( &CCompanyWrapper::receiver, this );
+    m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
 
 class COptimizer {
@@ -96,31 +104,55 @@ public:
 
     void start(int threadCount);
 
-    void stop(void);
+    void stop ( void );
 
-    void addCompany(ACompany company);
+    void addCompany ( ACompany company );
 
+    void worker ( void );
 private:
-    queue<ACompany> m_Companies;
+    vector<shared_ptr<CCompanyWrapper>> m_Companies;
 
     queue<AProblemPack> m_PackReturn;
     mutex m_MtxReturn;
 
     shared_ptr<CProgtestSolver> m_Solver;
 
+    vector<thread> m_Workers;
+
+    queue<AProgtestSolver> m_FullSolvers;
+
+    condition_variable m_CVWorker;
+    mutex m_MtxWorkerNoWork;
+
 };
 
-
-
 void COptimizer::start ( int threadCount ) {
+    for ( const auto & company : m_Companies )
+        company->startCompany();
+
+    for ( int i = 0; i < threadCount; i++ )
+        m_Workers.emplace_back ( &COptimizer::worker, this );
 }
 
 void COptimizer::stop ( void ) {
+
 }
 
-void COptimizer::addCompany(ACompany company) {
-    m_Companies.push( company );
+void COptimizer::addCompany ( ACompany company ) {
+    m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
 }
+
+void COptimizer::worker ( void ) {
+    unique_lock<mutex> lk (m_MtxWorkerNoWork);
+    m_CVWorker.wait( lk, [ this ] { return ! m_FullSolvers.empty(); } );
+
+    // !! lock
+    AProgtestSolver s = m_FullSolvers.front(); m_FullSolvers.pop();
+    // !! unlock
+    s->solve();
+
+}
+
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 #ifndef __PROGTEST__
