@@ -49,19 +49,20 @@ private:
 public:
 };
 
+class COptimizer;
 
 class CCompanyWrapper {
 public:
     explicit CCompanyWrapper ( ACompany company )
-    : m_Company ( company ) {}
+            : m_Company ( company ) {}
 
     thread m_ThrReceive;
-    void receiver (void );
+    void receiver ( COptimizer & optimizer  );
 
     thread m_ThrReturn;
     void returner ( void );
 
-    void startCompany ( void );
+    void startCompany ( COptimizer & optimizer );
 
 private:
     ACompany m_Company;
@@ -77,18 +78,22 @@ void CCompanyWrapper::returner ( void ) {
     m_CVReturner.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
 }
 
-void CCompanyWrapper::receiver ( void ) {
+// need to send the solver and fullSolver queue here
+void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     while ( true ) {
-        AProblemPack problem = m_Company->waitForPack();
-        if (!problem)
+        AProblemPack pPack = m_Company->waitForPack();
+        if (!pPack)
             break;
-        // iterate through problem in problem pack and fill the solver with them
+        for ( const auto & problem : pPack->m_Problems ) {
+
+        }
+        // iterate through problems in problem pack and fill the solver with them
         m_ProblemPacks.push(problem);
     }
 }
 
-void CCompanyWrapper::startCompany ( void ) {
-    m_ThrReceive = thread ( &CCompanyWrapper::receiver, this );
+void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
+    m_ThrReceive = thread ( &CCompanyWrapper::receiver, this, ref(optimizer) );
     m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
 
@@ -115,7 +120,7 @@ private:
     queue<AProblemPack> m_PackReturn;
     mutex m_MtxReturn;
 
-    shared_ptr<CProgtestSolver> m_Solver;
+    AProgtestSolver m_Solver;
 
     vector<thread> m_Workers;
 
@@ -128,7 +133,7 @@ private:
 
 void COptimizer::start ( int threadCount ) {
     for ( const auto & company : m_Companies )
-        company->startCompany();
+        company->startCompany( this );
 
     for ( int i = 0; i < threadCount; i++ )
         m_Workers.emplace_back ( &COptimizer::worker, this );
