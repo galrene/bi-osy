@@ -273,6 +273,11 @@ public:
 */
 #ifndef __PROGTEST__
 
+/**
+ * TODO: The templated thread safe queue as laid out in the code from the lab
+ *
+ */
+
 int main() {
     COptimizer optimizer;
     ACompanyTest company = std::make_shared<CCompanyTest>();
