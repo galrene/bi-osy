@@ -1,8 +1,18 @@
-Notes:
-    Mame obmedzeny pocet ProgtestSolverov, kde kazdy ma urcitu kapacitu mnozstva problemov ktore vie vyriesit.
-    Plytvanim (vyuzivanim instancie solveru na male mnozstvo problemov) moze dojst k vyplytvaniu solverov pred
-    vyriesenim vsetkych problemov.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+Notes:
     waitForPack IN comm vlakno asi najlepsie ked davkuje progtest solvery az kym nie su plne. vyzera, ze bude vyhodnejsie
     plnit solvery po jednom (jeden pre vsetky worker vlakna)
 
@@ -13,5 +23,4 @@ Peto advice:
 
 TODO:
     Producent konzument  readpack -> Worker a Worker -> returnpack
-    Jeden globalny solver pln zo vsetkych (samozrejme ho lockujes pri tom)
-    Jedna odovzdavacia q a jedna prijmacia q
+    Jeden globalny solver plnis zo komunikacnych, ked naplnia solver, jebne sa workerovi do ruky

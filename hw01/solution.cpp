@@ -43,13 +43,65 @@ using namespace std;
 
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
+// TODO: contains ptr to CProblemPack
+class CProblemWrapper;
+// TODO: after solving go through every problem and increment the solved problem count in it's pack
+class CProgtestSolverWrapper;
+
 class CProblemPackWrapper {
 private:
-    AProblemPack m_ProblemPack;
 public:
+    explicit CProblemPackWrapper ( AProblemPack pPack )
+    : m_ProblemPack ( pPack ) {}
+
+    // TODO: here comes some sort of validation to check whether the pack is wholly solved
+    bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
+
+    AProblemPack m_ProblemPack;
+    bool m_SolvedPack = false; // TODO: this needs to be locked when changed as well because it's used in a condition variable predicate
+    atomic_int m_SolvedCnt = 0;
 };
 
-class COptimizer;
+using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
+
+class CCompanyWrapper;
+using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
+
+class COptimizer {
+public:
+    COptimizer ()
+    : m_Solver ( createProgtestSolver() ), m_FinishedCompanies ( 0 ) {}
+
+    static bool usingProgtestSolver() { return true; }
+    // dummy implementation if usingProgtestSolver() returns true
+    static void checkAlgorithm(AProblem problem) {}
+
+    void start(int threadCount);
+
+    void stop ();
+
+    void addCompany ( ACompany company );
+
+    void worker ();
+
+    bool getNewSolver ();
+
+    bool allCompaniesFinishedSending () { return m_FinishedCompanies == m_Companies.size(); }
+
+    AProgtestSolver m_Solver;
+    queue<AProgtestSolver> m_FullSolvers;
+    atomic_size_t m_FinishedCompanies;
+private:
+    vector<shared_ptr<CCompanyWrapper>> m_Companies;
+    queue<CProblemPackWrapper> m_PackReturnQ;
+    mutex m_MtxReturn;
+
+    vector<thread> m_Workers;
+
+    condition_variable m_CVWorker;
+    mutex m_MtxWorkerNoWork;
+
+};
 
 class CCompanyWrapper {
 public:
@@ -60,36 +112,102 @@ public:
     void receiver ( COptimizer & optimizer  );
 
     thread m_ThrReturn;
-    void returner ( void );
+    void returner ();
+
+    void notify () { m_CVReturner.notify_one(); }
 
     void startCompany ( COptimizer & optimizer );
 
 private:
     ACompany m_Company;
 
-    condition_variable m_CVReturner;
     mutex m_MtxReturnerNoWork;
+    condition_variable m_CVReturner;
 
-    queue<CProblemPackWrapper> m_ProblemPacks;
+    mutex m_MtxProblemPackQueue;
+    queue<shared_ptr<CProblemPackWrapper>> m_ProblemPacks;
+    bool m_AllProblemsReceived = false; // were all problems already given to solvers for processing?
 };
 
-void CCompanyWrapper::returner ( void ) {
-    unique_lock<mutex> lk ( m_MtxReturnerNoWork );
-    m_CVReturner.wait( lk, [ this ] { return ! m_PackReceived.empty(); } );
+void COptimizer::worker () {
+    while ( true ) {
+        // TODO: if all companies are solved and solver queue is empty, break
+        unique_lock<mutex> loko (m_MtxWorkerNoWork);
+        m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
+        loko.unlock();
+
+        AProgtestSolver s = m_FullSolvers.front(); m_FullSolvers.pop();
+
+        s->solve();
+
+        loko.lock();
+        for ( const auto & company : m_Companies )
+            company->notify();
+        loko.unlock();
+    }
+}
+/**
+ * Stash full solver, get new empty solver and notify worker that a full solver is available.
+ */
+bool COptimizer::getNewSolver () {
+    m_FullSolvers.push ( m_Solver );
+    m_Solver = createProgtestSolver();
+    m_CVWorker.notify_one();
 }
 
-// need to send the solver and fullSolver queue here
+void COptimizer::start ( int threadCount ) {
+    for ( const auto & company : m_Companies )
+        company->startCompany( *this );
+
+    for ( int i = 0; i < threadCount; i++ )
+        m_Workers.emplace_back ( &COptimizer::worker, this );
+}
+
+void COptimizer::stop () {
+
+}
+
+void COptimizer::addCompany ( ACompany company ) {
+    m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
+}
+/**
+ * Return solved problem packs.
+ */
+void CCompanyWrapper::returner () {
+    while ( ! m_AllProblemsReceived ) {
+        unique_lock<mutex> lk ( m_MtxReturnerNoWork );
+        m_CVReturner.wait ( lk, [ this ] {
+            return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->m_SolvedPack;
+        } );
+        lk.unlock();
+        auto solvedPack = m_ProblemPacks.front();
+        m_ProblemPacks.pop();
+        m_Company->solvedPack ( solvedPack->m_ProblemPack );
+    }
+}
+
+/**
+ * Receive unsolved problem packs.
+ */
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
-    while ( true ) {
-        AProblemPack pPack = m_Company->waitForPack();
-        if (!pPack)
-            break;
+    while ( AProblemPack pPack = m_Company->waitForPack() ) {
+//        unique_lock<mutex> lk ( m_MtxProblemPackQueue );
+        m_ProblemPacks.emplace ( pPack );
+//        lk.unlock();
         for ( const auto & problem : pPack->m_Problems ) {
+            optimizer.m_Solver->addProblem ( problem ); // TODO: LOCKOVAT solver
+            if ( ! optimizer.m_Solver->hasFreeCapacity() )
+                optimizer.getNewSolver();
 
         }
-        // iterate through problems in problem pack and fill the solver with them
-        m_ProblemPacks.push(problem);
+        // here, if all problems of a given problem pack have been successfully given to solvers
     }
+    // here, if there are no more problems to be given for processing
+    m_AllProblemsReceived = true;
+    optimizer.m_FinishedCompanies++;
+    // if all companies are finished receiving, solve the last solver
+    if ( optimizer.allCompaniesFinishedSending() )
+        optimizer.m_FullSolvers.emplace ( optimizer.m_Solver );
 }
 
 void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
@@ -97,72 +215,65 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
     m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
 
-class COptimizer {
-public:
-    static bool usingProgtestSolver(void) {
-        return true;
-    }
-
-    static void checkAlgorithm(AProblem problem) {
-        // dummy implementation if usingProgtestSolver() returns true
-    }
-
-    void start(int threadCount);
-
-    void stop ( void );
-
-    void addCompany ( ACompany company );
-
-    void worker ( void );
+/*
+class CSafeQueue
+{
 private:
-    vector<shared_ptr<CCompanyWrapper>> m_Companies;
+  deque<item_t*>       buff;       // shared buffer
+  mutex                mtx;        // controls access to share buffer (critical section)
+  condition_variable   cv_empty;   // protects from removing items from an empty buffer
 
-    queue<AProblemPack> m_PackReturn;
-    mutex m_MtxReturn;
+  void PrintBuffer()
+  {
+    printf("Buffer: ");
+    for (deque<item_t*>::iterator it = buff.begin(); it!=buff.end(); ++it)
+      printf("[%d, %d, %d] ",(*it)->tid, (*it)->id, (*it)->value);
+    printf("\n");
+  }
 
-    AProgtestSolver m_Solver;
+public:
+  CSafeQueue() { }
 
-    vector<thread> m_Workers;
+  virtual void insert(item_t *item)
+  {
+    unique_lock<mutex> ul (mtx);
+    // cv_full.wait(ul, [ this ] () { return ( buff.size() < BUFFER_SIZE ); } );
+    buff.push_back(item);
 
-    queue<AProgtestSolver> m_FullSolvers;
+    printf("Producer %d:  item [%d,%d,%d,%c] was inserted\n",
+	    item->tid, item->tid, item->id, item->value, item->end ? 'T' : 'F' );
+    PrintBuffer();
 
-    condition_variable m_CVWorker;
-    mutex m_MtxWorkerNoWork;
+    cv_empty.notify_one();
+  }
 
+
+  virtual item_t * remove(int tid)
+  {
+    item_t *item;
+
+    unique_lock<mutex> ul (mtx);
+    cv_empty.wait(ul, [ this ] () { return ( ! buff.empty() ); } );
+    item = buff.front();
+    buff.pop_front();
+
+    printf("Consumer %d:  item [%d,%d,%d,%c] was removed\n",
+	    tid, item->tid, item->id, item->value, item->end ? 'T' : 'F');
+    PrintBuffer();
+
+    return item;
+  }
+
+
+  virtual bool empty()
+  {
+    return buff.empty();
+  }
 };
-
-void COptimizer::start ( int threadCount ) {
-    for ( const auto & company : m_Companies )
-        company->startCompany( this );
-
-    for ( int i = 0; i < threadCount; i++ )
-        m_Workers.emplace_back ( &COptimizer::worker, this );
-}
-
-void COptimizer::stop ( void ) {
-
-}
-
-void COptimizer::addCompany ( ACompany company ) {
-    m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
-}
-
-void COptimizer::worker ( void ) {
-    unique_lock<mutex> lk (m_MtxWorkerNoWork);
-    m_CVWorker.wait( lk, [ this ] { return ! m_FullSolvers.empty(); } );
-
-    // !! lock
-    AProgtestSolver s = m_FullSolvers.front(); m_FullSolvers.pop();
-    // !! unlock
-    s->solve();
-
-}
-
-
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------
+*/
 #ifndef __PROGTEST__
 
-int main(void) {
+int main() {
     COptimizer optimizer;
     ACompanyTest company = std::make_shared<CCompanyTest>();
     optimizer.addCompany(company);
