@@ -214,63 +214,50 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
     m_ThrReceive = thread ( &CCompanyWrapper::receiver, this, ref(optimizer) );
     m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
-
-/*
-class CSafeQueue
-{
+template < typename T_ >
+class CSafeQueue {
 private:
-  deque<item_t*>       buff;       // shared buffer
-  mutex                mtx;        // controls access to share buffer (critical section)
-  condition_variable   cv_empty;   // protects from removing items from an empty buffer
+  deque<T_> m_Queue;
+  mutex m_Mtx;        // controls access to the shared queue
+  condition_variable m_CVEmpty;   // protects from removing items from an empty buffer
 
-  void PrintBuffer()
-  {
-    printf("Buffer: ");
-    for (deque<item_t*>::iterator it = buff.begin(); it!=buff.end(); ++it)
-      printf("[%d, %d, %d] ",(*it)->tid, (*it)->id, (*it)->value);
-    printf("\n");
-  }
+//  void PrintBuffer() {
+//    printf("SafeQueue: ");
+//    for ( auto it = m_Queue.begin(); it!=m_Queue.end(); ++it )
+//      printf("[%d, %d, %d] ",(*it)->tid, (*it)->id, (*it)->value);
+//    printf("\n");
+//  }
 
 public:
-  CSafeQueue() { }
+  void push ( T_ item ) {
+    unique_lock<mutex> ul (m_Mtx);
+    // cv_full.wait(ul, [ this ] () { return ( m_Queue.size() < BUFFER_SIZE ); } );
+    m_Queue.push_back(item);
 
-  virtual void insert(item_t *item)
-  {
-    unique_lock<mutex> ul (mtx);
-    // cv_full.wait(ul, [ this ] () { return ( buff.size() < BUFFER_SIZE ); } );
-    buff.push_back(item);
+//    printf("Producer %d:  item [%d,%d,%d,%c] was inserted\n",
+//	    item->tid, item->tid, item->id, item->value, item->end ? 'T' : 'F' );
+//    PrintBuffer();
 
-    printf("Producer %d:  item [%d,%d,%d,%c] was inserted\n",
-	    item->tid, item->tid, item->id, item->value, item->end ? 'T' : 'F' );
-    PrintBuffer();
-
-    cv_empty.notify_one();
+    m_CVEmpty.notify_one();
   }
 
+  /**
+  * Pop and return the item at the front.
+  */
+  T_ pop () {
+    unique_lock<mutex> ul (m_Mtx);
+    m_CVEmpty.wait(ul, [ this ] () { return ( ! m_Queue.empty() ); } );
+    T_ item  = m_Queue.front();
+    m_Queue.pop_front();
 
-  virtual item_t * remove(int tid)
-  {
-    item_t *item;
-
-    unique_lock<mutex> ul (mtx);
-    cv_empty.wait(ul, [ this ] () { return ( ! buff.empty() ); } );
-    item = buff.front();
-    buff.pop_front();
-
-    printf("Consumer %d:  item [%d,%d,%d,%c] was removed\n",
-	    tid, item->tid, item->id, item->value, item->end ? 'T' : 'F');
-    PrintBuffer();
-
+//    printf("Consumer %d:  item [%d,%d,%d,%c] was removed\n",
+//	    tid, item->tid, item->id, item->value, item->end ? 'T' : 'F');
+//    PrintBuffer();
     return item;
   }
 
-
-  virtual bool empty()
-  {
-    return buff.empty();
-  }
+  bool empty() { return m_Queue.empty(); }
 };
-*/
 #ifndef __PROGTEST__
 
 /**
