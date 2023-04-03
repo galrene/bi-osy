@@ -44,25 +44,39 @@ using namespace std;
 
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
-// TODO: contains ptr to CProblemPack
-class CProblemWrapper;
-// TODO: after solving go through every problem and increment the solved problem count in it's pack
-class CProgtestSolverWrapper;
-
 class CProblemPackWrapper {
 private:
 public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
     : m_ProblemPack (std::move( pPack )) {}
 
+    // TODO: not called anywhere yet
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
 
     AProblemPack m_ProblemPack;
     bool m_SolvedPack = false; // TODO: this needs to be locked when changed as well because it's used in a condition variable predicate
-    atomic_int m_SolvedCnt = 0;
+    atomic_int m_SolvedCnt = 0; // TODO: not incremented anywhere yet
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
+
+// TODO: contains ptr to CProblemPack
+class CProblemWrapper {
+public:
+    AProblem m_Problem;
+    CProblemPackWrapper m_ParentProblemPack;
+};
+// TODO: after solving go through every problem and increment the solved problem count in it's pack
+class CSolverWrapper{
+private:
+        AProgtestSolver m_Solver;
+        vector<CProblemWrapper> m_Problems;
+public:
+    size_t solve ();
+    bool addProblem ( shared_ptr<CProblemPackWrapper> problem );
+    bool hasFreeCapacity ();
+};
+
 
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
@@ -107,10 +121,26 @@ public:
     }
 };
 
+bool CSolverWrapper::addProblem ( shared_ptr<CProblemWrapper> problem ) {
+    m_Solver->addProblem(problem);
+    m_Problems.push_back(problem);
+}
+
+size_t CSolverWrapper::solve () {
+        m_Solver->solve();
+        for ( const auto & problem : m_Problems )
+            problem.m_ParentProblemPack
+}
+
+bool CSolverWrapper::hasFreeCapacity() {
+    return m_Solver->hasFreeCapacity();
+}
+
+
 class COptimizer {
 public:
     COptimizer ()
-    : m_Solver ( createProgtestSolver() ), m_FinishedCompanies ( 0 ) {}
+    : m_Solver ( createProgtestSolver() ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
 
     static bool usingProgtestSolver() { return true; }
     // dummy implementation if usingProgtestSolver() returns true
@@ -126,11 +156,11 @@ public:
 
     bool getNewSolver ();
 
-    bool allCompaniesFinishedSending () { return m_FinishedCompanies == m_Companies.size(); }
+    bool allCompaniesFinishedSending () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
     AProgtestSolver m_Solver;
     CSafeQueue<AProgtestSolver > m_FullSolvers;
-    atomic_size_t m_FinishedCompanies;
+    atomic_size_t m_FinishedReceivingCompaniesCnt;
 private:
     vector<shared_ptr<CCompanyWrapper>> m_Companies;
     mutex m_MtxReturn;
@@ -168,22 +198,7 @@ private:
     bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
 };
 
-void COptimizer::worker () {
-    while ( true ) {
-        // TODO: if all companies are solved and solver queue is empty, break
-        unique_lock<mutex> loko (m_MtxWorkerNoWork);
-        m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
-        loko.unlock();
 
-        AProgtestSolver s = m_FullSolvers.pop();
-        s->solve();
-
-        loko.lock();
-        for ( const auto & company : m_Companies )
-            company->notify();
-        loko.unlock();
-    }
-}
 /**
  * Stash full solver, get new empty solver and notify worker that a full solver is available.
  */
@@ -208,11 +223,27 @@ void COptimizer::stop () {
 void COptimizer::addCompany ( ACompany company ) {
     m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
 }
+void COptimizer::worker () {
+    while ( true ) {
+        // TODO: if all companies are solved and solver queue is empty, break
+        unique_lock<mutex> loko (m_MtxWorkerNoWork);
+        m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
+        loko.unlock();
+
+        AProgtestSolver s = m_FullSolvers.pop();
+        s->solve();
+
+        loko.lock();
+        for ( const auto & company : m_Companies )
+            company->notify();
+        loko.unlock();
+    }
+}
 /**
  * Return solved problem packs.
  */
 void CCompanyWrapper::returner () {
-    while ( ! m_AllProblemsReceived ) {
+    while ( true ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
             return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->m_SolvedPack;
@@ -231,7 +262,7 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
             should call the CPPackWrapper constructor if correct. */
         m_ProblemPacks.push ( make_shared<CProblemPackWrapper> ( pPack ) );
         for ( const auto & problem : pPack->m_Problems ) {
-            optimizer.m_Solver->addProblem ( problem ); // TODO: LOCKOVAT solver
+            optimizer.m_Solver->addProblem ( problem ); // TODO: LOCKOVAT solver, wrapovat do problemWrapperu
             if ( ! optimizer.m_Solver->hasFreeCapacity() )
                 optimizer.getNewSolver();
 
@@ -240,7 +271,7 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     }
     // here, if there are no more problems to be given for processing
     m_AllProblemsReceived = true;
-    optimizer.m_FinishedCompanies++;
+    optimizer.m_FinishedReceivingCompaniesCnt++;
     // if all companies are finished receiving, solve the last solver
     if ( optimizer.allCompaniesFinishedSending() )
         optimizer.m_FullSolvers.push ( optimizer.m_Solver );
@@ -254,7 +285,7 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 #ifndef __PROGTEST__
 
 /**
- * TODO: Do I need to return the ProblemPacks as they were received in relation with the company or do I need to keep global order?
+ * TODO: How do I know that a company has all it's problems solved and therefore I can stop it's returner?
  *
  */
 
