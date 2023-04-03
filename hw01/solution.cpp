@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
 #include <array>
 #include <iterator>
@@ -52,9 +53,8 @@ class CProblemPackWrapper {
 private:
 public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
-    : m_ProblemPack ( pPack ) {}
+    : m_ProblemPack (std::move( pPack )) {}
 
-    // TODO: here comes some sort of validation to check whether the pack is wholly solved
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
 
     AProblemPack m_ProblemPack;
@@ -66,6 +66,46 @@ using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
 
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
+
+template < typename T_ >
+class CSafeQueue {
+private:
+  deque<T_> m_Queue;
+  mutex m_Mtx;        // controls access to the shared queue
+  condition_variable m_CVEmpty;   // protects from removing items from an empty buffer
+
+public:
+    void push ( T_ & item ) {
+      unique_lock<mutex> ul (m_Mtx);
+      m_Queue.push_back(item);
+      m_CVEmpty.notify_one();
+    }
+    void push ( T_ && item ) {
+        unique_lock<mutex> ul (m_Mtx);
+        m_Queue.push_back(item);
+        m_CVEmpty.notify_one();
+    }
+    auto front () {
+        unique_lock<mutex> ul (m_Mtx);
+        return m_Queue.front();
+    }
+
+    /**
+    * Pop and return the item at the front.
+    */
+    auto pop () {
+        unique_lock<mutex> ul (m_Mtx);
+        m_CVEmpty.wait(ul, [ this ] () { return ( ! m_Queue.empty() ); } );
+        T_ item  = m_Queue.front();
+        m_Queue.pop_front();
+        return item;
+    }
+    // TODO: Do I need to lock here? -> I do, right?
+    bool empty() {
+        unique_lock<mutex> ul (m_Mtx);
+        return m_Queue.empty();
+    }
+};
 
 class COptimizer {
 public:
@@ -89,11 +129,10 @@ public:
     bool allCompaniesFinishedSending () { return m_FinishedCompanies == m_Companies.size(); }
 
     AProgtestSolver m_Solver;
-    queue<AProgtestSolver> m_FullSolvers;
+    CSafeQueue<AProgtestSolver > m_FullSolvers;
     atomic_size_t m_FinishedCompanies;
 private:
     vector<shared_ptr<CCompanyWrapper>> m_Companies;
-    queue<CProblemPackWrapper> m_PackReturnQ;
     mutex m_MtxReturn;
 
     vector<thread> m_Workers;
@@ -125,8 +164,8 @@ private:
     condition_variable m_CVReturner;
 
     mutex m_MtxProblemPackQueue;
-    queue<shared_ptr<CProblemPackWrapper>> m_ProblemPacks;
-    bool m_AllProblemsReceived = false; // were all problems already given to solvers for processing?
+    CSafeQueue<shared_ptr<CProblemPackWrapper>> m_ProblemPacks;
+    bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
 };
 
 void COptimizer::worker () {
@@ -136,8 +175,7 @@ void COptimizer::worker () {
         m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
         loko.unlock();
 
-        AProgtestSolver s = m_FullSolvers.front(); m_FullSolvers.pop();
-
+        AProgtestSolver s = m_FullSolvers.pop();
         s->solve();
 
         loko.lock();
@@ -180,9 +218,7 @@ void CCompanyWrapper::returner () {
             return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->m_SolvedPack;
         } );
         lk.unlock();
-        auto solvedPack = m_ProblemPacks.front();
-        m_ProblemPacks.pop();
-        m_Company->solvedPack ( solvedPack->m_ProblemPack );
+        m_Company->solvedPack ( m_ProblemPacks.pop()->m_ProblemPack );
     }
 }
 
@@ -191,9 +227,9 @@ void CCompanyWrapper::returner () {
  */
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
-//        unique_lock<mutex> lk ( m_MtxProblemPackQueue );
-        m_ProblemPacks.emplace ( pPack );
-//        lk.unlock();
+        /* TODO: SUS - check what happens here - creating shared_ptr<CPPackWrapper> directly from PPack pointer
+            should call the CPPackWrapper constructor if correct. */
+        m_ProblemPacks.push ( make_shared<CProblemPackWrapper> ( pPack ) );
         for ( const auto & problem : pPack->m_Problems ) {
             optimizer.m_Solver->addProblem ( problem ); // TODO: LOCKOVAT solver
             if ( ! optimizer.m_Solver->hasFreeCapacity() )
@@ -207,61 +243,18 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     optimizer.m_FinishedCompanies++;
     // if all companies are finished receiving, solve the last solver
     if ( optimizer.allCompaniesFinishedSending() )
-        optimizer.m_FullSolvers.emplace ( optimizer.m_Solver );
+        optimizer.m_FullSolvers.push ( optimizer.m_Solver );
 }
 
 void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
     m_ThrReceive = thread ( &CCompanyWrapper::receiver, this, ref(optimizer) );
     m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
-template < typename T_ >
-class CSafeQueue {
-private:
-  deque<T_> m_Queue;
-  mutex m_Mtx;        // controls access to the shared queue
-  condition_variable m_CVEmpty;   // protects from removing items from an empty buffer
 
-//  void PrintBuffer() {
-//    printf("SafeQueue: ");
-//    for ( auto it = m_Queue.begin(); it!=m_Queue.end(); ++it )
-//      printf("[%d, %d, %d] ",(*it)->tid, (*it)->id, (*it)->value);
-//    printf("\n");
-//  }
-
-public:
-  void push ( T_ item ) {
-    unique_lock<mutex> ul (m_Mtx);
-    // cv_full.wait(ul, [ this ] () { return ( m_Queue.size() < BUFFER_SIZE ); } );
-    m_Queue.push_back(item);
-
-//    printf("Producer %d:  item [%d,%d,%d,%c] was inserted\n",
-//	    item->tid, item->tid, item->id, item->value, item->end ? 'T' : 'F' );
-//    PrintBuffer();
-
-    m_CVEmpty.notify_one();
-  }
-
-  /**
-  * Pop and return the item at the front.
-  */
-  T_ pop () {
-    unique_lock<mutex> ul (m_Mtx);
-    m_CVEmpty.wait(ul, [ this ] () { return ( ! m_Queue.empty() ); } );
-    T_ item  = m_Queue.front();
-    m_Queue.pop_front();
-
-//    printf("Consumer %d:  item [%d,%d,%d,%c] was removed\n",
-//	    tid, item->tid, item->id, item->value, item->end ? 'T' : 'F');
-//    PrintBuffer();
-    return item;
-  }
-
-  bool empty() { return m_Queue.empty(); }
-};
 #ifndef __PROGTEST__
 
 /**
- * TODO: The templated thread safe queue as laid out in the code from the lab
+ * TODO: Do I need to return the ProblemPacks as they were received in relation with the company or do I need to keep global order?
  *
  */
 
