@@ -221,7 +221,12 @@ void COptimizer::start ( int threadCount ) {
 }
 
 void COptimizer::stop () {
-
+    for ( auto & company : m_Companies ) {
+        company->m_ThrReceive.join();
+        company->m_ThrReturn.join();
+    }
+    for ( auto & worker : m_Workers )
+        worker.join();
 }
 
 void COptimizer::addCompany ( const ACompany& company ) {
@@ -286,10 +291,6 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 }
 
 #ifndef __PROGTEST__
-
-/**
- * TODO: How do I know that a company has all it's problems solved and therefore I can stop it's returner?
- */
 
 int main() {
     COptimizer optimizer;
