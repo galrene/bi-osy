@@ -12,15 +12,14 @@
 
 
 
-Notes:
-    waitForPack IN comm vlakno asi najlepsie ked davkuje progtest solvery az kym nie su plne. vyzera, ze bude vyhodnejsie
-    plnit solvery po jednom (jeden pre vsetky worker vlakna)
-
 Peto advice:
     Worker přijde, zamkne problem q, počká až není prázdná (conditional variable), vybere,
     co může (dokud je co brát a dokud je solver neplný). Pokud je solver plný, tak se odemkne zámek
     a spustim solve, pokud ne, tak jenom odemknu. Samo pak musíš ošetřit ukončení, aby se spustily i poloplné solvery
 
+Matej advice na zastavovanie workerov a returnera:
+    ja do tej queue [ProblemPack queue] posielam aj nullptr a ked ten returner vytiahne nullptr, tak poviem ze je hotovo
+    alebo potom ak uz je reciever hotovy a queue je prazdna
+
 TODO:
-    Producent konzument  readpack -> Worker a Worker -> returnpack
-    Jeden globalny solver plnis zo komunikacnych, ked naplnia solver, jebne sa workerovi do ruky
+

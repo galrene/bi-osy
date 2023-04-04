@@ -50,31 +50,44 @@ public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
     : m_ProblemPack (std::move( pPack )) {}
 
-    // TODO: not called anywhere yet
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
 
+    /**
+     * Increment solved amount, check whether the pack isn't fully solved after this.
+     */
+    void solveOne ();
+
     AProblemPack m_ProblemPack;
-    bool m_SolvedPack = false; // TODO: this needs to be locked when changed as well because it's used in a condition variable predicate
-    atomic_int m_SolvedCnt = 0; // TODO: not incremented anywhere yet
+
+    mutex m_MtxSolvedPackFlag;
+    bool m_SolvedPack = false;
+    atomic_size_t m_SolvedCnt = 0;
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
 
-// TODO: contains ptr to CProblemPack
+void CProblemPackWrapper::solveOne () {
+    m_SolvedCnt++;
+    if ( isFullySolved() ) {
+        lock_guard<mutex> l ( m_MtxSolvedPackFlag );
+        m_SolvedPack = true;
+    }
+}
+
 class CProblemWrapper {
 public:
     AProblem m_Problem;
     CProblemPackWrapper m_ParentProblemPack;
 };
-// TODO: after solving go through every problem and increment the solved problem count in it's pack
 class CSolverWrapper{
 private:
         AProgtestSolver m_Solver;
-        vector<CProblemWrapper> m_Problems;
+        vector<shared_ptr<CProblemWrapper>> m_Problems;
+        mutex m_MtxSolvedPackFlag;
 public:
     size_t solve ();
-    bool addProblem ( shared_ptr<CProblemPackWrapper> problem );
-    bool hasFreeCapacity ();
+    bool addProblem ( shared_ptr<CProblemWrapper> problem );
+    bool hasFreeCapacity() { return m_Solver->hasFreeCapacity(); }
 };
 
 
@@ -122,18 +135,14 @@ public:
 };
 
 bool CSolverWrapper::addProblem ( shared_ptr<CProblemWrapper> problem ) {
-    m_Solver->addProblem(problem);
+    m_Solver->addProblem(problem->m_Problem);
     m_Problems.push_back(problem);
 }
 
 size_t CSolverWrapper::solve () {
         m_Solver->solve();
         for ( const auto & problem : m_Problems )
-            problem.m_ParentProblemPack
-}
-
-bool CSolverWrapper::hasFreeCapacity() {
-    return m_Solver->hasFreeCapacity();
+            problem->m_ParentProblemPack.solveOne();
 }
 
 
@@ -287,6 +296,7 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 /**
  * TODO: How do I know that a company has all it's problems solved and therefore I can stop it's returner?
  *
+ * TODO: Rewrite to use my ProgtestSolver
  */
 
 int main() {
