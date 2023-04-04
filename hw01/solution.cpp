@@ -41,17 +41,15 @@
 using namespace std;
 #endif /* __PROGTEST__ */
 
-
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 class CProblemPackWrapper {
 private:
 public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
-    : m_ProblemPack (std::move( pPack )) {}
+    : m_ProblemPack ( std::move ( pPack ) ) {}
 
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
-
     /**
      * Increment solved amount, check whether the pack isn't fully solved after this.
      */
@@ -81,13 +79,14 @@ public:
     AProblem m_Problem;
     shared_ptr<CProblemPackWrapper> m_ParentProblemPack;
 };
-class CSolverWrapper{
+
+class CSafeSolver{
 private:
         AProgtestSolver m_Solver;
         vector<shared_ptr<CProblemWrapper>> m_Problems;
-        mutex m_MtxSolvedPackFlag;
+        mutex m_MtxSolver; // protects the global solver
 public:
-    explicit CSolverWrapper ( AProgtestSolver s )
+    explicit CSafeSolver ( AProgtestSolver s )
     : m_Solver (std::move( s )) {}
 
     size_t solve ();
@@ -138,22 +137,24 @@ public:
     }
 };
 
-bool CSolverWrapper::addProblem ( const shared_ptr<CProblemWrapper> & problem ) {
-    m_Solver->addProblem(problem->m_Problem);
+bool CSafeSolver::addProblem ( const shared_ptr<CProblemWrapper> & problem ) {
+    lock_guard<mutex> l ( m_MtxSolver );
     m_Problems.push_back(problem);
+    return m_Solver->addProblem(problem->m_Problem);
 }
 
-size_t CSolverWrapper::solve () {
-        m_Solver->solve();
+size_t CSafeSolver::solve () {
+        lock_guard<mutex> l ( m_MtxSolver );
+        size_t solvedCnt = m_Solver->solve();
         for ( const auto & problem : m_Problems )
             problem->m_ParentProblemPack->solveOne();
+        return solvedCnt;
 }
-
 
 class COptimizer {
 public:
     COptimizer ()
-    : m_Solver ( make_shared<CSolverWrapper> ( createProgtestSolver() ) ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
+    : m_Solver ( make_shared<CSafeSolver> ( createProgtestSolver() ) ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
 
     static bool usingProgtestSolver() { return true; }
     // dummy implementation if usingProgtestSolver() returns true
@@ -175,11 +176,10 @@ public:
      */
     void stashSolver();
 
-
     bool allCompaniesFinishedSending () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
-    shared_ptr<CSolverWrapper> m_Solver;
-    CSafeQueue<shared_ptr<CSolverWrapper>> m_FullSolvers;
+    shared_ptr<CSafeSolver> m_Solver;
+    CSafeQueue<shared_ptr<CSafeSolver>> m_FullSolvers;
     atomic_size_t m_FinishedReceivingCompaniesCnt;
 private:
     vector<shared_ptr<CCompanyWrapper>> m_Companies;
@@ -220,7 +220,8 @@ private:
 
 
 bool COptimizer::getNewSolver () {
-    m_Solver = make_shared<CSolverWrapper> ( createProgtestSolver() );
+    m_Solver = make_shared<CSafeSolver> ( createProgtestSolver() );
+    return m_Solver != nullptr;
 }
 
 void COptimizer::stashSolver() {
@@ -284,7 +285,7 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
         m_ProblemPacks.push ( packWrapPtr );
         for ( const auto & problem : pPack->m_Problems ) {
             optimizer.m_Solver->addProblem ( make_shared<CProblemWrapper>
-                    ( CProblemWrapper ( problem, packWrapPtr ) ) ); // TODO: LOCKOVAT solver
+                    ( CProblemWrapper ( problem, packWrapPtr ) ) );
             if ( ! optimizer.m_Solver->hasFreeCapacity() ) {
                 optimizer.stashSolver();
                 optimizer.getNewSolver();
@@ -309,8 +310,6 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 
 /**
  * TODO: How do I know that a company has all it's problems solved and therefore I can stop it's returner?
- *
- * TODO: Rewrite to use my ProgtestSolver
  */
 
 int main() {
@@ -320,7 +319,7 @@ int main() {
     optimizer.start(4);
     optimizer.stop();
     if (!company->allProcessed())
-        throw std::logic_error("(some) problems were not correctly processsed");
+        throw std::logic_error("(some) problems were not correctly processed");
     return 0;
 }
 

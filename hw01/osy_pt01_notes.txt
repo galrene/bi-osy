@@ -21,5 +21,3 @@ Matej advice na zastavovanie workerov a returnera:
     ja do tej queue [ProblemPack queue] posielam aj nullptr a ked ten returner vytiahne nullptr, tak poviem ze je hotovo
     alebo potom ak uz je reciever hotovy a queue je prazdna
 
-TODO:
-
