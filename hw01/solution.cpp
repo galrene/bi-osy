@@ -247,7 +247,7 @@ void COptimizer::worker () {
  * Return solved problem packs.
  */
 void CCompanyWrapper::returner () {
-    while ( true ) {
+    while ( ! ( m_AllProblemsReceived && m_ProblemPacks.empty() ) ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
             return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved();
