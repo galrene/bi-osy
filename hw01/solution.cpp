@@ -74,25 +74,29 @@ void CProblemPackWrapper::solveOne () {
 
 class CProblemWrapper {
 public:
-    explicit CProblemWrapper ( AProblem prob, shared_ptr<CProblemPackWrapper> probPack )
+    explicit CProblemWrapper ( AProblem prob, AProblemPackWrapper probPack )
     : m_Problem ( std::move ( prob ) ), m_ParentProblemPack ( std::move ( probPack ) ) {}
     AProblem m_Problem;
-    shared_ptr<CProblemPackWrapper> m_ParentProblemPack;
+    AProblemPackWrapper m_ParentProblemPack;
 };
+
+using AProblemWrapper = shared_ptr<CProblemWrapper>;
 
 class CSafeSolver{
 private:
         AProgtestSolver m_Solver;
-        vector<shared_ptr<CProblemWrapper>> m_Problems;
+        vector<AProblemWrapper> m_Problems;
         mutex m_MtxSolver; // protects the global solver
 public:
     explicit CSafeSolver ( AProgtestSolver s )
     : m_Solver (std::move( s )) {}
 
     size_t solve ();
-    bool addProblem ( const shared_ptr<CProblemWrapper>& problem );
+    bool addProblem ( const AProblemWrapper& problem );
     bool hasFreeCapacity() { return m_Solver->hasFreeCapacity(); }
 };
+
+using ASafeSolver = shared_ptr<CSafeSolver>;
 
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
@@ -137,7 +141,7 @@ public:
     }
 };
 
-bool CSafeSolver::addProblem ( const shared_ptr<CProblemWrapper> & problem ) {
+bool CSafeSolver::addProblem ( const AProblemWrapper & problem ) {
     lock_guard<mutex> l ( m_MtxSolver );
     m_Problems.push_back(problem);
     return m_Solver->addProblem(problem->m_Problem);
@@ -178,11 +182,11 @@ public:
 
     bool allCompaniesFinishedSending () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
-    shared_ptr<CSafeSolver> m_Solver;
-    CSafeQueue<shared_ptr<CSafeSolver>> m_FullSolvers;
+    ASafeSolver m_Solver;
+    CSafeQueue<ASafeSolver> m_FullSolvers;
     atomic_size_t m_FinishedReceivingCompaniesCnt;
 private:
-    vector<shared_ptr<CCompanyWrapper>> m_Companies;
+    vector<ACompanyWrapper> m_Companies;
     mutex m_MtxReturn;
 
     vector<thread> m_Workers;
@@ -214,7 +218,7 @@ private:
     condition_variable m_CVReturner;
 
     mutex m_MtxProblemPackQueue;
-    CSafeQueue<shared_ptr<CProblemPackWrapper>> m_ProblemPacks;
+    CSafeQueue<AProblemPackWrapper> m_ProblemPacks;
     bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
 };
 
@@ -279,8 +283,6 @@ void CCompanyWrapper::returner () {
  */
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
-        /* TODO: SUS - check what happens here - creating shared_ptr<CPPackWrapper> directly from PPack pointer
-            should call the CPPackWrapper constructor if correct. */
         auto packWrapPtr = make_shared<CProblemPackWrapper> ( pPack );
         m_ProblemPacks.push ( packWrapPtr );
         for ( const auto & problem : pPack->m_Problems ) {
@@ -290,7 +292,6 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
                 optimizer.stashSolver();
                 optimizer.getNewSolver();
             }
-
         }
         // here, if all problems of a given problem pack have been successfully given to solvers
     }
