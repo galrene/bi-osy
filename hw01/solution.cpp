@@ -76,8 +76,10 @@ void CProblemPackWrapper::solveOne () {
 
 class CProblemWrapper {
 public:
+    explicit CProblemWrapper ( AProblem prob, shared_ptr<CProblemPackWrapper> probPack )
+    : m_Problem ( std::move ( prob ) ), m_ParentProblemPack ( std::move ( probPack ) ) {}
     AProblem m_Problem;
-    CProblemPackWrapper m_ParentProblemPack;
+    shared_ptr<CProblemPackWrapper> m_ParentProblemPack;
 };
 class CSolverWrapper{
 private:
@@ -85,11 +87,13 @@ private:
         vector<shared_ptr<CProblemWrapper>> m_Problems;
         mutex m_MtxSolvedPackFlag;
 public:
+    explicit CSolverWrapper ( AProgtestSolver s )
+    : m_Solver (std::move( s )) {}
+
     size_t solve ();
-    bool addProblem ( shared_ptr<CProblemWrapper> problem );
+    bool addProblem ( const shared_ptr<CProblemWrapper>& problem );
     bool hasFreeCapacity() { return m_Solver->hasFreeCapacity(); }
 };
-
 
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
@@ -134,7 +138,7 @@ public:
     }
 };
 
-bool CSolverWrapper::addProblem ( shared_ptr<CProblemWrapper> problem ) {
+bool CSolverWrapper::addProblem ( const shared_ptr<CProblemWrapper> & problem ) {
     m_Solver->addProblem(problem->m_Problem);
     m_Problems.push_back(problem);
 }
@@ -142,14 +146,14 @@ bool CSolverWrapper::addProblem ( shared_ptr<CProblemWrapper> problem ) {
 size_t CSolverWrapper::solve () {
         m_Solver->solve();
         for ( const auto & problem : m_Problems )
-            problem->m_ParentProblemPack.solveOne();
+            problem->m_ParentProblemPack->solveOne();
 }
 
 
 class COptimizer {
 public:
     COptimizer ()
-    : m_Solver ( createProgtestSolver() ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
+    : m_Solver ( make_shared<CSolverWrapper> ( createProgtestSolver() ) ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
 
     static bool usingProgtestSolver() { return true; }
     // dummy implementation if usingProgtestSolver() returns true
@@ -159,16 +163,23 @@ public:
 
     void stop ();
 
-    void addCompany ( ACompany company );
+    void addCompany ( const ACompany& company );
 
     void worker ();
-
+    /**
+    * Constructs a new empty solver.
+    */
     bool getNewSolver ();
+    /**
+     * Enqueues a solver and notifies worker.
+     */
+    void stashSolver();
+
 
     bool allCompaniesFinishedSending () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
-    AProgtestSolver m_Solver;
-    CSafeQueue<AProgtestSolver > m_FullSolvers;
+    shared_ptr<CSolverWrapper> m_Solver;
+    CSafeQueue<shared_ptr<CSolverWrapper>> m_FullSolvers;
     atomic_size_t m_FinishedReceivingCompaniesCnt;
 private:
     vector<shared_ptr<CCompanyWrapper>> m_Companies;
@@ -184,7 +195,7 @@ private:
 class CCompanyWrapper {
 public:
     explicit CCompanyWrapper ( ACompany company )
-            : m_Company ( company ) {}
+            : m_Company ( std::move(company) ) {}
 
     thread m_ThrReceive;
     void receiver ( COptimizer & optimizer  );
@@ -208,12 +219,12 @@ private:
 };
 
 
-/**
- * Stash full solver, get new empty solver and notify worker that a full solver is available.
- */
 bool COptimizer::getNewSolver () {
+    m_Solver = make_shared<CSolverWrapper> ( createProgtestSolver() );
+}
+
+void COptimizer::stashSolver() {
     m_FullSolvers.push ( m_Solver );
-    m_Solver = createProgtestSolver();
     m_CVWorker.notify_one();
 }
 
@@ -229,7 +240,7 @@ void COptimizer::stop () {
 
 }
 
-void COptimizer::addCompany ( ACompany company ) {
+void COptimizer::addCompany ( const ACompany& company ) {
     m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
 }
 void COptimizer::worker () {
@@ -239,7 +250,7 @@ void COptimizer::worker () {
         m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
         loko.unlock();
 
-        AProgtestSolver s = m_FullSolvers.pop();
+        auto s = m_FullSolvers.pop();
         s->solve();
 
         loko.lock();
@@ -269,11 +280,15 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
         /* TODO: SUS - check what happens here - creating shared_ptr<CPPackWrapper> directly from PPack pointer
             should call the CPPackWrapper constructor if correct. */
-        m_ProblemPacks.push ( make_shared<CProblemPackWrapper> ( pPack ) );
+        auto packWrapPtr = make_shared<CProblemPackWrapper> ( pPack );
+        m_ProblemPacks.push ( packWrapPtr );
         for ( const auto & problem : pPack->m_Problems ) {
-            optimizer.m_Solver->addProblem ( problem ); // TODO: LOCKOVAT solver, wrapovat do problemWrapperu
-            if ( ! optimizer.m_Solver->hasFreeCapacity() )
+            optimizer.m_Solver->addProblem ( make_shared<CProblemWrapper>
+                    ( CProblemWrapper ( problem, packWrapPtr ) ) ); // TODO: LOCKOVAT solver
+            if ( ! optimizer.m_Solver->hasFreeCapacity() ) {
+                optimizer.stashSolver();
                 optimizer.getNewSolver();
+            }
 
         }
         // here, if all problems of a given problem pack have been successfully given to solvers
@@ -281,9 +296,8 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     // here, if there are no more problems to be given for processing
     m_AllProblemsReceived = true;
     optimizer.m_FinishedReceivingCompaniesCnt++;
-    // if all companies are finished receiving, solve the last solver
     if ( optimizer.allCompaniesFinishedSending() )
-        optimizer.m_FullSolvers.push ( optimizer.m_Solver );
+        optimizer.stashSolver();
 }
 
 void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
