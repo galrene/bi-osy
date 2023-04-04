@@ -47,14 +47,14 @@ class CProblemPackWrapper {
 private:
 public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
-    : m_ProblemPack ( std::move ( pPack ) ) {}
+    : m_ProblemPack ( std::move ( pPack ) ), m_SolvedCnt ( 0 ) {}
 
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
 
     AProblemPack m_ProblemPack;
 
     mutex m_MtxSolvedPackFlag;
-    atomic_size_t m_SolvedCnt = 0;
+    atomic_size_t m_SolvedCnt;
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
@@ -93,8 +93,8 @@ template < typename T_ >
 class CSafeQueue {
 private:
   deque<T_> m_Queue;
-  mutex m_Mtx;        // controls access to the shared queue
-  condition_variable m_CVEmpty;   // protects from removing items from an empty buffer
+  mutex m_Mtx;                    // controls access to the shared queue
+  condition_variable m_CVEmpty;   // protects from removing items from an empty queue
 
 public:
     void push ( T_ & item ) {
@@ -102,16 +102,10 @@ public:
       m_Queue.push_back(item);
       m_CVEmpty.notify_one();
     }
-    void push ( T_ && item ) {
-        unique_lock<mutex> ul (m_Mtx);
-        m_Queue.push_back(item);
-        m_CVEmpty.notify_one();
-    }
     auto front () {
         unique_lock<mutex> ul (m_Mtx);
         return m_Queue.front();
     }
-
     /**
     * Pop and return the item at the front.
     */
@@ -122,7 +116,6 @@ public:
         m_Queue.pop_front();
         return item;
     }
-    // TODO: Do I need to lock here? -> I do, right?
     bool empty() {
         unique_lock<mutex> ul (m_Mtx);
         return m_Queue.empty();
@@ -235,8 +228,8 @@ void COptimizer::addCompany ( const ACompany& company ) {
     m_Companies.emplace_back (make_shared<CCompanyWrapper>(company) );
 }
 void COptimizer::worker () {
-    while ( true ) {
-        // TODO: if all companies are solved and solver queue is empty, break
+    // if all companies won't get new problems and solver queue is empty, break
+    while ( ! ( allCompaniesFinishedReceiving() && m_FullSolvers.empty() ) ) {
         unique_lock<mutex> loko (m_MtxWorkerNoWork);
         m_CVWorker.wait( loko, [ this ] { return ! m_FullSolvers.empty(); } );
         loko.unlock();
