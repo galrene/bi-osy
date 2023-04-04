@@ -50,27 +50,15 @@ public:
     : m_ProblemPack ( std::move ( pPack ) ) {}
 
     bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
-    /**
-     * Increment solved amount, check whether the pack isn't fully solved after this.
-     */
-    void solveOne ();
 
     AProblemPack m_ProblemPack;
 
     mutex m_MtxSolvedPackFlag;
-    bool m_SolvedPack = false;
     atomic_size_t m_SolvedCnt = 0;
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
 
-void CProblemPackWrapper::solveOne () {
-    m_SolvedCnt++;
-    if ( isFullySolved() ) {
-        lock_guard<mutex> l ( m_MtxSolvedPackFlag );
-        m_SolvedPack = true;
-    }
-}
 
 class CProblemWrapper {
 public:
@@ -151,7 +139,7 @@ size_t CSafeSolver::solve () {
         lock_guard<mutex> l ( m_MtxSolver );
         size_t solvedCnt = m_Solver->solve();
         for ( const auto & problem : m_Problems )
-            problem->m_ParentProblemPack->solveOne();
+            problem->m_ParentProblemPack->m_SolvedCnt++;
         return solvedCnt;
 }
 
@@ -161,7 +149,6 @@ public:
     : m_Solver ( make_shared<CSafeSolver> ( createProgtestSolver() ) ), m_FinishedReceivingCompaniesCnt ( 0 ) {}
 
     static bool usingProgtestSolver() { return true; }
-    // dummy implementation if usingProgtestSolver() returns true
     static void checkAlgorithm(AProblem problem) {}
 
     void start(int threadCount);
@@ -180,7 +167,7 @@ public:
      */
     void stashSolver();
 
-    bool allCompaniesFinishedSending () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
+    bool allCompaniesFinishedReceiving () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
     ASafeSolver m_Solver;
     CSafeQueue<ASafeSolver> m_FullSolvers;
@@ -221,7 +208,6 @@ private:
     CSafeQueue<AProblemPackWrapper> m_ProblemPacks;
     bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
 };
-
 
 bool COptimizer::getNewSolver () {
     m_Solver = make_shared<CSafeSolver> ( createProgtestSolver() );
@@ -271,13 +257,12 @@ void CCompanyWrapper::returner () {
     while ( true ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
-            return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->m_SolvedPack;
+            return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved();
         } );
         lk.unlock();
         m_Company->solvedPack ( m_ProblemPacks.pop()->m_ProblemPack );
     }
 }
-
 /**
  * Receive unsolved problem packs.
  */
@@ -298,7 +283,7 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     // here, if there are no more problems to be given for processing
     m_AllProblemsReceived = true;
     optimizer.m_FinishedReceivingCompaniesCnt++;
-    if ( optimizer.allCompaniesFinishedSending() )
+    if ( optimizer.allCompaniesFinishedReceiving() )
         optimizer.stashSolver();
 }
 
