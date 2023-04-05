@@ -26,4 +26,4 @@ doc/
 # Ignore Clion stuff
 .idea/
 cmake-build-*/
-CMakeLists.txt
+*/CMakeLists.txt
