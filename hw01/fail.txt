@@ -1,0 +1,79 @@
+5575
+Starting company 0
+Starting receiver 0
+Pack size: 3
+Pack size: 2
+Stashing solver filled: 4
+Stashing solver filled: 1
+Pack size: 4
+Stashing solver filled: 4
+Pack size: 1
+Pack size: 2
+Stashing solver filled: 2
+Pack size: 3
+Stashing solver filled: 2
+Pack size: 3
+Stashing solver filled: 3
+Pack size: 4
+Stashing solver filled: 5
+Pack size: 1
+Stashing solver filled: 2
+Pack size: 1
+Pack size: 1
+Stashing solver filled: 2
+Pack size: 1
+Pack size: 4
+Stashing solver filled: 2
+Pack size: 3
+Stashing solver filled: 5
+Stashing solver filled: 1
+Pack size: 4
+Stashing solver filled: 3
+Pack size: 4
+Stashing solver filled: 3
+Pack size: 3
+Stashing solver filled: 5
+Pack size: 3
+Stashing solver filled: 3
+Pack size: 3
+Stashing solver filled: 3
+Stopping receiver 0
+Starting returner 0
+COptimizer::stop
+Starting worker 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Calling solve
+Calling solve
+Returning pack of company 0
+Returning pack of company 0
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Calling solve
+Returning pack of company 0
+Returning pack of company 0
+Calling solve
+Stopping worker 0

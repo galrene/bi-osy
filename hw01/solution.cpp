@@ -102,39 +102,39 @@ private:
 
 public:
     void push ( T_ & item ) {
-      unique_lock<mutex> ul (m_Mtx);
-      m_Queue.push_back(item);
-      m_CVEmpty.notify_one();
+      unique_lock<mutex> ul ( m_Mtx );
+      m_Queue.push_back ( item );
+      m_CVEmpty.notify_all();
     }
     auto front () {
-        unique_lock<mutex> ul (m_Mtx);
+        unique_lock<mutex> ul ( m_Mtx );
         return m_Queue.front();
     }
     /**
     * Pop and return the item at the front.
     */
     auto pop () {
-        unique_lock<mutex> ul (m_Mtx);
-        m_CVEmpty.wait(ul, [ this ] () { return ( ! m_Queue.empty() ); } );
+        unique_lock<mutex> ul ( m_Mtx );
+        m_CVEmpty.wait ( ul, [ this ] () { return ! m_Queue.empty(); } );
         T_ item  = m_Queue.front();
         m_Queue.pop_front();
         return item;
     }
     bool empty() {
-        unique_lock<mutex> ul (m_Mtx);
+        unique_lock<mutex> ul ( m_Mtx );
         return m_Queue.empty();
     }
 };
 
 bool CSafeSolver::addProblem ( const AProblemWrapper & problem ) {
     lock_guard<mutex> l ( m_MtxSolver );
-    m_Problems.push_back(problem);
-    return m_Solver->addProblem(problem->m_Problem);
+    m_Problems.push_back ( problem );
+    return m_Solver->addProblem ( problem->m_Problem );
 }
 
 size_t CSafeSolver::solve () {
-        printf("Calling solve\n");
         lock_guard<mutex> l ( m_MtxSolver );
+        printf("Calling solve\n");
         size_t solvedCnt = m_Solver->solve();
         for ( const auto & problem : m_Problems )
             problem->m_ParentProblemPack->m_SolvedCnt++;
@@ -172,7 +172,6 @@ public:
     atomic_size_t m_FinishedReceivingCompaniesCnt;
 private:
     vector<ACompanyWrapper> m_Companies;
-    mutex m_MtxReturn;
 
     vector<thread> m_Workers;
 
@@ -198,7 +197,7 @@ public:
      */
     void returner ();
 
-    void notify () { m_CVReturner.notify_one(); }
+    void notify () { m_CVReturner.notify_all(); }
 
     void startCompany ( COptimizer & optimizer );
 
@@ -221,7 +220,7 @@ void COptimizer::stashSolver() {
     printf("Stashing solver filled: %ld\n", m_Solver->size() );
 
     m_FullSolvers.push ( m_Solver );
-    m_CVWorker.notify_one();
+    m_CVWorker.notify_all();
 }
 
 void COptimizer::start ( int threadCount ) {
@@ -234,12 +233,13 @@ void COptimizer::start ( int threadCount ) {
 
 void COptimizer::stop () {
     printf("COptimizer::stop\n");
-    for ( auto & company : m_Companies ) {
-        company->m_ThrReceive.join();
-        company->m_ThrReturn.join();
-    }
     for ( auto & worker : m_Workers )
         worker.join();
+    for ( auto & company : m_Companies ) {
+        company->m_ThrReceive.join();
+        company->notify();
+        company->m_ThrReturn.join();
+    }
 }
 
 void COptimizer::addCompany ( const ACompany& company ) {
@@ -247,8 +247,8 @@ void COptimizer::addCompany ( const ACompany& company ) {
 }
 void COptimizer::worker () {
     atomic_int id = workerCounter++;
-    printf("Starting worker %d\n", id.load());
-
+    printf("Starting worker %d\n", id.load() );
+    // TODO: Deadlocks, because worker ends sooner than returner, therefore doesn't notify him for the last return
     // if all companies won't get new problems and solver queue is empty, break
     while ( ! ( allCompaniesFinishedReceiving() && m_FullSolvers.empty() ) ) {
         unique_lock<mutex> loko (m_MtxWorkerNoWork);
@@ -270,9 +270,15 @@ void CCompanyWrapper::returner () {
     while ( ! ( m_AllProblemsReceived.load() && m_ProblemPacks.empty() ) ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
-            return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved();
+            return ( ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved() )
+                    || m_AllProblemsReceived.load();
         } );
+        if ( m_AllProblemsReceived.load() && m_ProblemPacks.empty() )
+            break;
+        if ( m_ProblemPacks.empty() )
+            continue;
         lk.unlock();
+        printf("Returning pack of company %d\n", m_CompanyID );
         m_Company->solvedPack ( m_ProblemPacks.pop()->m_ProblemPack );
     }
     printf("Stopping returner %d\n", m_CompanyID);
@@ -297,6 +303,7 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     // here, if there are no more problems to be given for processing
     m_AllProblemsReceived = true;
     optimizer.m_FinishedReceivingCompaniesCnt++;
+    // stash the last (not necessarily full) solver
     if ( optimizer.allCompaniesFinishedReceiving() )
         optimizer.stashSolver();
     printf("Stopping receiver %d\n", m_CompanyID );
@@ -309,16 +316,21 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 }
 
 #ifndef __PROGTEST__
-
+/**
+ * TODO: something's fucky real big time, the conditions in returner can't be correct
+ * @return
+ */
 int main() {
-    COptimizer optimizer;
-    ACompanyTest company = std::make_shared<CCompanyTest>();
-    optimizer.addCompany(company);
-//    optimizer.start(4);
-    optimizer.start(1);
-    optimizer.stop();
-    if (!company->allProcessed())
-        throw std::logic_error("(some) problems were not correctly processed");
+    for ( int i = 0; i < 5000; i++ ) {
+        COptimizer optimizer;
+        ACompanyTest company = std::make_shared<CCompanyTest>();
+        optimizer.addCompany(company);
+//        optimizer.start(4);
+        optimizer.start(1);
+        optimizer.stop();
+        if (!company->allProcessed())
+            throw std::logic_error("(some) problems were not correctly processed");
+    }
     return 0;
 }
 

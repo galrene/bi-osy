@@ -1,7 +1,7 @@
 CXX=g++
 LD=g++
 AR=ar
-CXXFLAGS=-std=c++17 -Wall -pedantic -O2 -g -fsanitize=thread
+CXXFLAGS=-std=c++17 -Wall -pedantic -O2 -g -fsanitize=thread -fno-sanitize-recover=all -fstack-protector
 SHELL:=/bin/bash
 MACHINE=$(shell uname -m)-$(shell echo $$OSTYPE)
 
