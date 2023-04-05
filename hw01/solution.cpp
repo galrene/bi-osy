@@ -82,6 +82,7 @@ public:
     explicit CSafeSolver ( AProgtestSolver s )
     : m_Solver (std::move( s )) {}
 
+    size_t size () { lock_guard<mutex> l ( m_MtxSolver ); return m_Problems.size(); }
     size_t solve ();
     bool addProblem ( const AProblemWrapper& problem );
     bool hasFreeCapacity() { return m_Solver->hasFreeCapacity(); }
@@ -207,9 +208,8 @@ private:
     mutex m_MtxReturnerNoWork;
     condition_variable m_CVReturner;
 
-    mutex m_MtxProblemPackQueue;
     CSafeQueue<AProblemPackWrapper> m_ProblemPacks;
-    bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
+    atomic_bool m_AllProblemsReceived = false; // have all the problems already been given to solvers for processing?
 };
 
 bool COptimizer::getNewSolver () {
@@ -218,7 +218,8 @@ bool COptimizer::getNewSolver () {
 }
 
 void COptimizer::stashSolver() {
-    printf("Stashing solver\n");
+    printf("Stashing solver filled: %ld\n", m_Solver->size() );
+
     m_FullSolvers.push ( m_Solver );
     m_CVWorker.notify_one();
 }
@@ -266,7 +267,6 @@ void COptimizer::worker () {
 }
 void CCompanyWrapper::returner () {
     printf("Starting returner %d\n", m_CompanyID );
-    // TODO: Deadlocks here I guess
     while ( ! ( m_AllProblemsReceived && m_ProblemPacks.empty() ) ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
@@ -281,7 +281,7 @@ void CCompanyWrapper::returner () {
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     printf("Starting receiver %d\n", m_CompanyID);
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
-        printf("Pack size: &ld\n", pPack->m_Problems.size() );
+        printf("Pack size: %ld\n", pPack->m_Problems.size() );
         auto packWrapPtr = make_shared<CProblemPackWrapper> ( pPack );
         m_ProblemPacks.push ( packWrapPtr );
         for ( const auto & problem : pPack->m_Problems ) {
