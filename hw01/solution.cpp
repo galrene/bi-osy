@@ -267,7 +267,7 @@ void COptimizer::worker () {
 }
 void CCompanyWrapper::returner () {
     printf("Starting returner %d\n", m_CompanyID );
-    while ( ! ( m_AllProblemsReceived && m_ProblemPacks.empty() ) ) {
+    while ( ! ( m_AllProblemsReceived.load() && m_ProblemPacks.empty() ) ) {
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
             return ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved();
