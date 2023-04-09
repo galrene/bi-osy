@@ -21,3 +21,25 @@ Matej advice na zastavovanie workerov a returnera:
     ja do tej queue [ProblemPack queue] posielam aj nullptr a ked ten returner vytiahne nullptr, tak poviem ze je hotovo
     alebo potom ak uz je reciever hotovy a queue je prazdna
 
+Kto by mal davat kill flag na returner, nie worker?
+
+1.) dostavam pomaly rovnomerne problem packy, ktore sa priebezne solvuju a priebezne ho zobudzaju, ked pride posledny a s nim kill flag
+(vsetky problemy received bool) tak sa preberie. bud zisti ze uz ho vlastne stihol odovzdat medzi tym jak prisiel kill flag a breakne
+hned po zobudeni, alebo ho odovzda a vo while podmienke sa breakne a ukonci.
+2.) dostanem vela easy problem packov, ktore sa velmi rychlo za sebou solvnu a pride mi N notifyov od workerov za sebou,
+kde useful bol iba ten prvy a ja odovzdam 1 pack a zaspim, az kym mi nepride kill flag. vtedy sa furt budim kedze kill flag
+je splneny a odovzdavam kym v queue nieco je.
+3.) dostanem tazke problemy, ktore dlho trvaju na solve. kill flag ako ho mam teraz (all problems received) pride velmi
+skoro a teda returner sa furt bude budit a bude sa snazit odovzdat nevyriesene packy, co je zle. kebyze tam dam normalnu
+podmienku ze if ( ! front.solved() ) continue, tak ma vlastne busy waiting co je tiez zle, nie?
+
+Cize nemal by som skor mat nejaky counter hotovych problemPackov pre danu spolocnost a ako killflag pouzivat
+nie all problems received ale all problems solved, ktory bude davat worker I guess?
+
+Pomaly pripad:
+Pomale solve a jebne sa tam nullptr
+
+Rychly pripad:
+Rychle solve a jebne sa tam nullptr.
+
+Moze nastat pripad, kedy returner spi a zaroven je v queue iba nullptr?
