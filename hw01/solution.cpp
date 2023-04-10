@@ -53,15 +53,14 @@ public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
     : m_ProblemPack ( std::move ( pPack ) ), m_SolvedCnt ( 0 ) {}
 
-    bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
-
+    bool isFullySolved () { lock_guard<mutex> l ( m_Mtx); return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
+    void solveOne () { lock_guard<mutex> l ( m_Mtx); m_SolvedCnt++; }
     AProblemPack m_ProblemPack;
-
-    atomic_size_t m_SolvedCnt;
+    mutex m_Mtx;
+    size_t m_SolvedCnt;
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
-
 
 class CProblemWrapper {
 public:
@@ -145,7 +144,7 @@ size_t CSafeSolver::solve () {
     fprintf ( stderr, "Calling solve\n");
     size_t solvedCnt = m_Solver->solve();
     for ( const auto & problem : m_Problems )
-        problem->m_ParentProblemPack->m_SolvedCnt++;
+        problem->m_ParentProblemPack->solveOne();
     return solvedCnt;
 }
 
@@ -211,7 +210,7 @@ public:
 
 private:
     ACompany m_Company;
-    int m_CompanyID;
+    int m_CompanyID; // debug
     mutex m_MtxReturnerNoWork;
     condition_variable m_CVReturner;
 
@@ -243,7 +242,6 @@ void COptimizer::stop () {
         worker.join();
     for ( auto & company : m_Companies ) {
         company->m_ThrReceive.join();
-        company->notify();
         company->m_ThrReturn.join();
     }
 }
@@ -274,12 +272,14 @@ void COptimizer::worker () {
 void CCompanyWrapper::returner () {
     fprintf ( stderr, "Starting returner %d\n", m_CompanyID );
     while ( true ) {
+        fprintf ( stderr, "RET BEGIN CYCLE\n" );
         unique_lock<mutex> lk ( m_MtxReturnerNoWork );
         m_CVReturner.wait ( lk, [ this ] {
-            fprintf ( stderr, "CHECKING PREDICATE\n" );
+            fprintf ( stderr, "RET CHECKING PREDICATE\n" );
             return m_ProblemPacks.isFrontNull()
                    || ( ! m_ProblemPacks.empty () && m_ProblemPacks.front()->isFullySolved() );
         } );
+        fprintf ( stderr, "RET ALIVE\n" );
         // no more problem packs to be returned
         if ( m_ProblemPacks.isFrontNull() )
             break;
