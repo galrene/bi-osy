@@ -225,6 +225,7 @@ bool COptimizer::getNewSolver () {
 void COptimizer::stashSolver() {
     fprintf ( stderr, "Stashing solver filled: %ld\n", m_Solver->size() );
     m_FullSolvers.push ( m_Solver );
+    lock_guard<mutex> lk ( m_MtxWorkerNoWork );
     m_CVWorker.notify_all();
 }
 
@@ -250,7 +251,7 @@ void COptimizer::addCompany ( const ACompany& company ) {
 }
 void COptimizer::worker () {
     atomic_int id = workerCounter++; // debug
-    fprintf ( stderr, "Starting worker %d\n", id.load() );
+    fprintf ( stderr, "WORKER: Starting %d\n", id.load() );
     // if all companies won't get new problems and solver queue is empty, break
     while ( ! ( allCompaniesFinishedReceiving() && m_FullSolvers.empty() ) ) {
         unique_lock<mutex> loko (m_MtxWorkerNoWork);
@@ -262,12 +263,12 @@ void COptimizer::worker () {
 
         loko.lock();
         for ( const auto & company : m_Companies ) {
-            fprintf ( stderr, "Notifying company\n" );
+            fprintf ( stderr, "WORKER: Notifying company\n" );
             company->notify();
         }
         loko.unlock();
     }
-    fprintf ( stderr, "Stopping worker %d\n", id.load() );
+    fprintf ( stderr, "WORKER: Stopping %d\n", id.load() );
 }
 void CCompanyWrapper::returner () {
     fprintf ( stderr, "Starting returner %d\n", m_CompanyID );
@@ -308,7 +309,8 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     // here, if there are no more problems to be given for processing
     shared_ptr<CProblemPackWrapper> eof = nullptr;
     m_ProblemPacks.push ( eof );
-    notify(); // TODO: shouldn't be necessary, since after the last solver is solved, workers notify EVERY company after solving
+//    notify(); // TODO: shouldn't be necessary, since after the last solver is solved, workers notify EVERY company after solving
+//    fprintf ( stderr, "Notifying at NULLPTR\n");
 
     optimizer.m_FinishedReceivingCompaniesCnt++;
     // stash the last (not necessarily full) solver
