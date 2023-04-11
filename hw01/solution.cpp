@@ -51,9 +51,8 @@ class CProblemPackWrapper {
 private:
 public:
     explicit CProblemPackWrapper ( AProblemPack pPack )
-    : m_ProblemPack ( std::move ( pPack ) ), m_SolvedCnt ( 0 ) {}
+    : m_ProblemPack ( std::move ( pPack ) ) {}
 
-    bool isFullySolved () { return m_SolvedCnt == m_ProblemPack->m_Problems.size(); }
     bool isSolved () {
         for ( const auto & problem : m_ProblemPack->m_Problems )
             if ( problem->m_MaxProfit == 0 )
@@ -61,7 +60,6 @@ public:
         return true;
     }
     AProblemPack m_ProblemPack;
-    atomic_size_t m_SolvedCnt;
 };
 
 using AProblemPackWrapper = shared_ptr<CProblemPackWrapper>;
@@ -164,7 +162,7 @@ public:
     auto pop () {
         unique_lock<mutex> ul ( m_Mtx );
         m_CVEmpty.wait ( ul, [ this ] {
-//            fprintf ( stderr, "CHECKING PREDICATE\n" );
+            // nullptr at front means all packs that were ever received were already solved
             return ( ! m_Queue.empty() && m_Queue.front() == nullptr )
                    || ( ! m_Queue.empty() && m_Queue.front()->isSolved() );
         } );
@@ -191,8 +189,6 @@ size_t CSafeSolver::solve () {
     lock_guard<mutex> l ( m_MtxSolver );
 //    fprintf ( stderr, "Calling solve\n");
     size_t solvedCnt = m_Solver->solve();
-//    for ( const auto & problem : m_Problems )
-//        problem->m_ParentProblemPack->m_SolvedCnt++;
     return solvedCnt;
 }
 
@@ -219,7 +215,6 @@ public:
      * Enqueues a solver and notifies worker.
      */
     void stashSolver();
-    // TODO: consider locking here
     bool allCompaniesFinishedReceiving () { return m_FinishedReceivingCompaniesCnt == m_Companies.size(); }
 
     ASafeSolver m_Solver;
@@ -296,7 +291,7 @@ void COptimizer::addCompany ( const ACompany& company ) {
 }
 void COptimizer::worker () {
     atomic_int id = workerCounter++; // debug
-//    fprintf ( stderr, "WORKER: Starting %d\n", id.load() );
+    fprintf ( stderr, "WORKER: Starting %d\n", id.load() );
     // if all companies won't get new problems and solver queue is empty, break
     while ( ! ( allCompaniesFinishedReceiving() && m_FullSolvers.empty() ) ) {
         unique_lock<mutex> loko (m_MtxWorkerNoWork);
@@ -313,25 +308,17 @@ void COptimizer::worker () {
         }
         loko.unlock();
     }
-//    fprintf ( stderr, "WORKER: Stopping %d\n", id.load() );
+    fprintf ( stderr, "WORKER: Stopping %d\n", id.load() );
 }
 void CCompanyWrapper::returner () {
-//    fprintf ( stderr, "Starting returner %d\n", m_CompanyID );
-    while ( true ) {
-////        fprintf ( stderr, "RET BEGIN CYCLE\n" );
-////        fprintf ( stderr, "RET ALIVE\n" );
-        auto pack = m_ProblemPacks.pop();
-        if ( pack == nullptr )
-            break;
-////        fprintf ( stderr, "Returning pack of company %d\n", m_CompanyID );
+    fprintf ( stderr, "Starting returner %d\n", m_CompanyID );
+    while ( auto pack = m_ProblemPacks.pop() )
         m_Company->solvedPack ( pack->m_ProblemPack );
-    }
-//    fprintf ( stderr, "Stopping returner %d\n", m_CompanyID);
+    fprintf ( stderr, "Stopping returner %d\n", m_CompanyID);
 }
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
-//    fprintf ( stderr, "Starting receiver %d\n", m_CompanyID);
+    fprintf ( stderr, "Starting receiver %d\n", m_CompanyID);
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
-////        fprintf ( stderr, "Pack size: %ld\n", pPack->m_Problems.size() );
         auto packWrapPtr = make_shared<CProblemPackWrapper> ( pPack );
         m_ProblemPacks.push ( packWrapPtr );
         for ( const auto & problem : pPack->m_Problems ) {
@@ -348,17 +335,17 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     shared_ptr<CProblemPackWrapper> eof = nullptr;
     m_ProblemPacks.push ( eof );
     notify(); // TODO: shouldn't be necessary, since after the last solver is solved, workers notify EVERY company after solving
-////    fprintf ( stderr, "Notifying at NULLPTR\n");
 
     optimizer.m_FinishedReceivingCompaniesCnt++;
     // stash the last (not necessarily full) solver
+    // TODO: consider locking here
     if ( optimizer.allCompaniesFinishedReceiving() )
         optimizer.stashSolver();
-//    fprintf ( stderr, "Stopping receiver %d\n", m_CompanyID );
+    fprintf ( stderr, "Stopping receiver %d\n", m_CompanyID );
 }
 
 void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
-//    fprintf ( stderr, "Starting company %d\n", m_CompanyID );
+    fprintf ( stderr, "Starting company %d\n", m_CompanyID );
     m_ThrReceive = thread ( &CCompanyWrapper::receiver, this, ref(optimizer) );
     m_ThrReturn = thread ( &CCompanyWrapper::returner, this );
 }
