@@ -94,11 +94,23 @@ using ASafeSolver = shared_ptr<CSafeSolver>;
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
 
+
+bool CSafeSolver::addProblem ( const AProblemWrapper & problem ) {
+    lock_guard<mutex> l ( m_MtxSolver );
+    m_Problems.push_back ( problem );
+    return m_Solver->addProblem ( problem->m_Problem );
+}
+
+size_t CSafeSolver::solve () {
+    return m_Solver->solve();
+}
+
 class CSolverQueue {
 private:
   deque<ASafeSolver> m_Queue;
   mutex m_Mtx;                    // controls access to the shared queue
   condition_variable m_CVEmpty;   // protects from removing items from an empty queue
+  bool m_KillFlag = false;
 
 public:
     void push ( ASafeSolver & item ) {
@@ -119,9 +131,11 @@ public:
     /**
     * Pop and return the item at the front.
     */
-    auto pop () {
+    ASafeSolver pop () {
         unique_lock<mutex> ul ( m_Mtx );
-        m_CVEmpty.wait ( ul, [ this ] { return ! m_Queue.empty(); } );
+        m_CVEmpty.wait ( ul, [ this ] { return ! m_Queue.empty() || m_KillFlag ; } );
+        if ( m_Queue.empty() && m_KillFlag )
+            return nullptr;
         ASafeSolver item  = m_Queue.front();
         m_Queue.pop_front();
         return item;
@@ -131,6 +145,7 @@ public:
         return m_Queue.empty();
     }
     void notify () { unique_lock<mutex> ul ( m_Mtx ); m_CVEmpty.notify_all(); }
+    void setKillFlag () { unique_lock<mutex> ul ( m_Mtx ); m_KillFlag = true; m_CVEmpty.notify_all(); }
 };
 
 
@@ -176,16 +191,6 @@ public:
     }
     void notify() { unique_lock<mutex> ul ( m_Mtx ); m_CVEmpty.notify_all(); }
 };
-
-bool CSafeSolver::addProblem ( const AProblemWrapper & problem ) {
-    lock_guard<mutex> l ( m_MtxSolver );
-    m_Problems.push_back ( problem );
-    return m_Solver->addProblem ( problem->m_Problem );
-}
-
-size_t CSafeSolver::solve () {
-    return m_Solver->solve();
-}
 
 class COptimizer {
 public:
@@ -294,6 +299,8 @@ void COptimizer::worker () {
 
     while ( ! ( m_FullSolvers.empty() && allCompaniesFinishedReceiving() ) ) {
         auto s = m_FullSolvers.pop();
+        if ( ! s )
+            break;
         s->solve();
         fprintf ( stderr, "WORKER: Notifying companies\n" );
         notifyCompanies();
@@ -331,8 +338,10 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     optimizer.m_FinishedReceivingCompaniesCnt++;
     // stash the last (not necessarily full) solver
     // TODO: consider locking here
-    if ( optimizer.allCompaniesFinishedReceiving() )
+    if ( optimizer.allCompaniesFinishedReceiving() ) {
         optimizer.stashSolver();
+        optimizer.m_FullSolvers.setKillFlag();
+    }
     fprintf ( stderr, "RECEIVER: stop %d\n", m_CompanyID );
 }
 
@@ -343,20 +352,27 @@ void CCompanyWrapper::startCompany ( COptimizer & optimizer ) {
 }
 
 #ifndef __PROGTEST__
-/**
- */
 int main() {
-    for ( int i = 0; i < 10000; i++ ) {
+    int runs = 5000;
+    int c = 1;
+    int w = 4;
+
+    for ( int i = 0; i < runs; i++ ) {
         fprintf ( stderr, "=====================BEGIN===============================\n");
 //        fprintf ( stderr, "%d\n", i );
         COptimizer optimizer;
-        ACompanyTest company = std::make_shared<CCompanyTest>();
-        optimizer.addCompany(company);
-        optimizer.start(4);
-//        optimizer.start(1);
+        vector<ACompanyTest> companies;
+        for ( int j = 0; j < c; j++ ) {
+            ACompanyTest company = std::make_shared<CCompanyTest>();
+            companies.push_back(company);
+        }
+        for ( const auto & company : companies )
+            optimizer.addCompany(company);
+        optimizer.start(w);
         optimizer.stop();
-        if (!company->allProcessed())
-            throw std::logic_error("(some) problems were not correctly processed");
+        for ( const auto & company : companies )
+            if (!company->allProcessed())
+                throw std::logic_error("(some) problems were not correctly processed");
         fprintf ( stderr, "=====================END======================================\n");
     }
     return 0;
