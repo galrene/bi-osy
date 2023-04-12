@@ -44,8 +44,7 @@ using namespace std;
 using namespace std;
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-int companyCounter = 0;
-atomic_int workerCounter = 0;
+//atomic_int workerCounter = 0;
 
 class CProblemPackWrapper {
 private:
@@ -82,7 +81,6 @@ public:
     explicit CSolverWrapper ( AProgtestSolver s )
     : m_Solver ( std::move ( s ) ) {}
 
-    size_t size () { return m_Problems.size(); }
     size_t solve () { return m_Solver->solve(); }
     bool addProblem ( const AProblemWrapper& problem ) {
         m_Problems.push_back ( problem );
@@ -94,40 +92,6 @@ using ASolverWrapper = shared_ptr<CSolverWrapper>;
 
 class CCompanyWrapper;
 using ACompanyWrapper = shared_ptr<CCompanyWrapper>;
-
-
-
-//class CSolverQueue {
-//private:
-//  deque<ASafeSolver> m_Queue;
-//  mutex m_Mtx;                    // controls access to the shared queue
-//  condition_variable m_CVEmpty;   // protects from removing items from an empty queue
-//  bool m_KillFlag = false;
-//
-//public:
-//    void push ( ASafeSolver & item ) {
-//      unique_lock<mutex> ul ( m_Mtx );
-//      m_Queue.push_back ( item );
-//      m_CVEmpty.notify_all();
-//    }
-//    /**
-//    * Pop and return the item at the front.
-//    */
-//    ASafeSolver pop () {
-//        unique_lock<mutex> ul ( m_Mtx );
-//        m_CVEmpty.wait ( ul, [ this ] { return ! m_Queue.empty() || m_KillFlag ; } );
-//        if ( m_Queue.empty() && m_KillFlag )
-//            return nullptr;
-//        ASafeSolver item  = m_Queue.front();
-//        m_Queue.pop_front();
-//        return item;
-//    }
-//    bool empty() {
-//        unique_lock<mutex> ul ( m_Mtx );
-//        return m_Queue.empty();
-//    }
-//    void setKillFlag () { unique_lock<mutex> ul ( m_Mtx ); m_KillFlag = true; m_CVEmpty.notify_all(); }
-//};
 
 
 class CSafePPackQueue {
@@ -142,16 +106,6 @@ public:
       m_Queue.push_back ( item );
       m_CVEmpty.notify_all();
     }
-    auto front () {
-        unique_lock<mutex> ul ( m_Mtx );
-        return m_Queue.front();
-    }
-    bool isFrontNull () {
-        unique_lock<mutex> ul ( m_Mtx );
-        if ( ! m_Queue.empty () )
-            return m_Queue.front() == nullptr;
-        return false;
-    }
     /**
     * Pop and return the item at the front.
     */
@@ -165,10 +119,6 @@ public:
         AProblemPackWrapper item  = m_Queue.front();
         m_Queue.pop_front();
         return item;
-    }
-    bool empty() {
-        unique_lock<mutex> ul ( m_Mtx );
-        return m_Queue.empty();
     }
     void notify() { unique_lock<mutex> ul ( m_Mtx ); m_CVEmpty.notify_all(); }
 };
@@ -213,8 +163,8 @@ private:
 
 class CCompanyWrapper {
 public:
-    explicit CCompanyWrapper ( ACompany company, int id )
-            : m_Company ( std::move(company) ), m_CompanyID ( id ) {}
+    explicit CCompanyWrapper ( ACompany company )
+            : m_Company ( std::move(company) ) {}
 
     thread m_ThrReceive;
     /**
@@ -234,7 +184,6 @@ public:
 
 private:
     ACompany m_Company;
-    int m_CompanyID; // debug
     CSafePPackQueue m_ProblemPacks;
 };
 /**
@@ -273,10 +222,10 @@ void COptimizer::stop () {
     }
 }
 void COptimizer::addCompany ( const ACompany& company ) {
-    m_Companies.emplace_back ( make_shared<CCompanyWrapper> ( company, companyCounter++ ) );
+    m_Companies.emplace_back ( make_shared<CCompanyWrapper> ( company ) );
 }
 void COptimizer::worker () {
-    atomic_int id = workerCounter++; // debug
+//    atomic_int id = workerCounter++; // debug
 //    fprintf ( stderr, "WORKER: Starting %d\n", id.load() );
     // if all companies won't get new problems and solver queue is empty, break
 
@@ -304,7 +253,7 @@ void CCompanyWrapper::returner () {
 //    fprintf ( stderr, "RETURNER: stop %d\n", m_CompanyID);
 }
 void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
-//    fprintf ( stderr, "RECIEVER: start %d\n", m_CompanyID);
+//    fprintf ( stderr, "RECEIVER: start %d\n", m_CompanyID);
     while ( AProblemPack pPack = m_Company->waitForPack() ) {
         auto packWrapPtr = make_shared<CProblemPackWrapper> ( pPack );
         m_ProblemPacks.push ( packWrapPtr );
@@ -324,10 +273,8 @@ void CCompanyWrapper::receiver ( COptimizer & optimizer  ) {
     // here, if there are no more problems to be given for processing
     AProblemPackWrapper eofPack = nullptr;
     m_ProblemPacks.push ( eofPack );
-//    notify();
     optimizer.m_FinishedReceivingCompaniesCnt++;
     // stash the last (not necessarily full) solver
-    // TODO: consider locking here
     unique_lock<mutex> lk ( optimizer.m_MtxSolver );
     if ( optimizer.allCompaniesFinishedReceiving() ) {
         optimizer.stashSolver();
