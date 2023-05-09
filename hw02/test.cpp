@@ -12,43 +12,62 @@ using namespace std;
 /**
  * A memory block.
  *
- * Free block consists of: 4 * uintptr_8 = 32B
+ * Free block in memory consists of: 4 * uintptr_8 = 32B
  * [BLOCK_SIZE][PREVIOUS_BLOCK][NEXT_BLOCK][BLOCK_SIZE]
  * where last bit of size is allocated flag
  */
-class CBlock {
-private:
+struct CBlock {
     size_t m_Size;
     CBlock * m_Prev;
     CBlock * m_Next;
+    CBlock ()
+    : m_Size ( 0 ), m_Prev ( nullptr ), m_Next ( nullptr ) {}
 };
 
 /**
- * Bidirectional linked list consisting of memory blocks.
- *
+ * Bidirectional for memory blocks.
  */
 class CBiLL {
 private:
-    CBlock * m_Front;
+    CBlock * m_Front = nullptr;
 public:
+    bool empty () { return m_Front == nullptr; }
     void pushFront ( CBlock * item ) {
         if ( ! m_Front ) {
             m_Front = item;
             return;
         }
-        CBlock * tmp = m_Front;
+        CBlock * prevFront = m_Front;
+        prevFront->m_Prev = item;
         m_Front = item;
-
-
+        m_Front->m_Next = prevFront;
     }
-    void pop ( CBlock * item ) {
+    bool pop ( CBlock * item ) {
+        // the case of a single item in the LL
+        if ( item == m_Front
+             && ! m_Front->m_Next ) {
+            m_Front = nullptr;
+            return true;
+        }
+        CBlock * curr = m_Front;
+        while ( curr ) {
+            if ( curr == item ) {
+                if ( curr->m_Prev )
+                    curr->m_Prev->m_Next = curr->m_Next;
+                if ( curr->m_Next )
+                    curr->m_Next->m_Prev = curr->m_Prev;
+                return true;
+            }
+            curr = curr->m_Next;
+        }
+        return false;
     }
 };
 
 class CHeap {
 private:
     /* Linked lists of sizes 2^i */
-    CBiLL* m_MemBlockLists[32] = {};
+    CBiLL * m_MemBlockLists[32] = {};
     uintptr_t * m_Begin;
     size_t m_Size;
 
@@ -56,7 +75,7 @@ private:
 
 public:
     CHeap ( uintptr_t * begin, size_t size )
-    : m_Begin ( begin ), m_HeapSize ( size ), m_AllocatedCnt ( 0 ) {}
+    : m_Begin ( begin ), m_Size ( size ), m_AllocatedCnt ( 0 ) {}
 };
 
 void   HeapInit    ( void * memPool, int memSize ) {
