@@ -13,7 +13,7 @@ using namespace std;
  * A memory block.
  *
  * Free block in memory consists of: 4 * uintptr_8 = 32B
- * [BLOCK_SIZE][PREVIOUS_BLOCK][NEXT_BLOCK][BLOCK_SIZE]
+ * [BLOCK_SIZE][PREVIOUS_BLOCK_PTR][NEXT_BLOCK_PTR][BLOCK_SIZE]
  * where last bit of size is allocated flag
  */
 struct CBlock {
@@ -67,15 +67,35 @@ public:
 class CHeap {
 private:
     /* Linked lists of sizes 2^i */
-    CBiLL * m_MemBlockLists[32] = {};
+    CBiLL * m_MemBlocks[32] = {};
     uintptr_t * m_Begin;
-    size_t m_Size;
+    int m_Size;
+    size_t m_AllocatedCnt; // number of allocated blocks
 
-    size_t m_AllocatedCnt;
+    /**
+     * Split a number into powers of two.
+     */
+    bool split ( int n ) {
+        for ( int i = 0; n > 0; i++ ) {
+            if ( n & 1 )
+                m_MemBlocks[1 << i] =
+            n >>= 1;
+        }
+
+    return powers;
+}
 
 public:
-    CHeap ( uintptr_t * begin, size_t size )
+    CHeap ( uintptr_t * begin, int size )
     : m_Begin ( begin ), m_Size ( size ), m_AllocatedCnt ( 0 ) {}
+
+    void init () {
+        // TODO: check size and begin ptr validity
+
+        while ( 1 ) {
+            double res = floor ( ( double ) m_Size - log2 ( m_Size ) )
+        }
+    }
 };
 
 void   HeapInit    ( void * memPool, int memSize ) {
