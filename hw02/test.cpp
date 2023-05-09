@@ -16,51 +16,37 @@ using namespace std;
  * [BLOCK_SIZE][PREVIOUS_BLOCK_PTR][NEXT_BLOCK_PTR][BLOCK_SIZE]
  * where last bit of size is allocated flag
  */
-struct CBlock {
-    size_t m_Size;
-    CBlock * m_Prev;
-    CBlock * m_Next;
-    CBlock ()
-    : m_Size ( 0 ), m_Prev ( nullptr ), m_Next ( nullptr ) {}
-};
+
 
 /**
  * Bidirectional for memory blocks.
  */
 class CBiLL {
 private:
-    CBlock * m_Front = nullptr;
+    uintptr_t * m_Front = nullptr;
 public:
     bool empty () { return m_Front == nullptr; }
-    void pushFront ( CBlock * item ) {
+
+    void pushFront ( uintptr_t * item ) {
         if ( ! m_Front ) {
             m_Front = item;
             return;
         }
-        CBlock * prevFront = m_Front;
-        prevFront->m_Prev = item;
+        uintptr_t * prevFront = m_Front;
+        prevFront[1] = (uintptr_t) item;
         m_Front = item;
-        m_Front->m_Next = prevFront;
+        m_Front[2] = (uintptr_t) prevFront;
     }
-    bool pop ( CBlock * item ) {
+    void pop ( uintptr_t * item ) {
+        auto prev = (uintptr_t *) item[1];
+        auto next = (uintptr_t *) item[2];
         // the case of a single item in the LL
-        if ( item == m_Front
-             && ! m_Front->m_Next ) {
-            m_Front = nullptr;
-            return true;
-        }
-        CBlock * curr = m_Front;
-        while ( curr ) {
-            if ( curr == item ) {
-                if ( curr->m_Prev )
-                    curr->m_Prev->m_Next = curr->m_Next;
-                if ( curr->m_Next )
-                    curr->m_Next->m_Prev = curr->m_Prev;
-                return true;
-            }
-            curr = curr->m_Next;
-        }
-        return false;
+        if ( item == m_Front )
+            m_Front = next;
+        if ( prev )
+            prev[2] = (uintptr_t) next;
+        if ( next )
+            next[1] = (uintptr_t) prev;
     }
 };
 
@@ -71,19 +57,26 @@ private:
     uintptr_t * m_Begin;
     int m_Size;
     size_t m_AllocatedCnt; // number of allocated blocks
-
     /**
      * Split a number into powers of two.
      */
-    bool split ( int n ) {
-        for ( int i = 0; n > 0; i++ ) {
-            if ( n & 1 )
-                m_MemBlocks[1 << i] =
+    void split ( int n ) {
+        uintptr_t * currPos = m_Begin;
+        for ( size_t i = 0; n > 0; i++ ) {
+            if ( n & 1 ) {
+                createBlock (currPos, i );
+                currPos += 1 << i;
+            }
             n >>= 1;
         }
-
-    return powers;
-}
+    }
+    void createBlock ( uintptr_t * address, size_t i ) {
+        address[0] = 1 << i;
+        address[1] = 0;
+        address[2] = 0;
+        address[ ( (1 << i) / 8 ) - 1] = (1 << i); // uintptr_t = 8B, size is in Bytes
+        m_MemBlocks[i]->pushFront ( address );
+    }
 
 public:
     CHeap ( uintptr_t * begin, int size )
@@ -91,10 +84,6 @@ public:
 
     void init () {
         // TODO: check size and begin ptr validity
-
-        while ( 1 ) {
-            double res = floor ( ( double ) m_Size - log2 ( m_Size ) )
-        }
     }
 };
 
