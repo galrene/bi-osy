@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cmath>
 using namespace std;
+#include <iostream>
 #endif /* __PROGTEST__ */
 
 #define ALLOC_MEMORY_RANGE 32
@@ -47,6 +48,16 @@ public:
         if ( next )
             next[1] = (uintptr_t) prev;
     }
+
+#ifndef __PROGTEST__
+    void print () {
+        uintptr_t * curr = m_Front;
+        while ( curr ) {
+            cout << "Block address: " << curr << " Size: " << (curr[0] & ~1) << " Free " << ! (curr[0] & 1) << endl;
+            curr = (uintptr_t *) curr[2];
+        }
+    }
+#endif
 };
 /**
  * Free block in memory consists of:
@@ -93,11 +104,23 @@ public:
     CHeap () = default;
     CHeap ( uintptr_t * begin, int size )
     : m_Begin ( begin ), m_Size ( size ), m_AllocatedCnt ( 0 ) {}
+#ifndef __PROGTEST__
+    void printBlocks () {
+        for ( size_t i = 0; i < ALLOC_MEMORY_RANGE; i++ ) {
+            if ( m_MemBlocks[i].front() ) {
+                cout << "index: " << i << " 2^i = " << (1 << i) << endl;
+                m_MemBlocks[i].print();
+            }
+        }
+    }
+#endif
 
     void init () {
         splitMemSpace (m_Size );
     }
     int done () { return m_AllocatedCnt; }
+
+    size_t getBlockSize ( uintptr_t * block ) { return block[0] & ~1; }
 
     /**
      * Splits block at given index until one with required size is created.
@@ -118,6 +141,7 @@ public:
             createBlock ( blockToSplit + (newBlockSize / sizeof (uintptr_t)), newBlockIndex );
             blockToSplitPow--;
         }
+        m_MemBlocks[blockToSplitPow].pop(blockToSplit);
         return blockToSplit;
     }
     /**
@@ -135,6 +159,8 @@ public:
     }
 
     uintptr_t * alloc ( size_t size ) {
+        if ( size == 0 )
+            return nullptr;
         size_t sizeWithHeader = size + (2 * sizeof (size_t)); // requested memory + header info
         int neededBlockIndex = ceil (log2(sizeWithHeader ) ); // exact power of 2 or the next biggest
 
@@ -149,6 +175,66 @@ public:
         }
         return nullptr;
     }
+
+    bool exists ( uintptr_t * block ) {
+        uintptr_t * currPos = m_Begin;
+        if ( block < m_Begin || block > (m_Begin + m_Size / sizeof(uintptr_t)) )
+            return false;
+        while ( currPos < block )
+            currPos += (currPos[0] & ~1) / sizeof(uintptr_t); // ignore free/allocated bit
+        return currPos == block;
+    }
+
+    bool mergeBuddies ( uintptr_t * leftBuddy, uintptr_t * rightBuddy ) {
+        // check if right buddy isn't outside given memory space
+        if ( rightBuddy > m_Begin + m_Size / sizeof(uintptr_t) )
+            return false;
+        // merge only if both are of the same size and free
+        if ( rightBuddy[0] == leftBuddy[0] ) {
+                auto buddyPairPow = (size_t) log2 ( leftBuddy[0] );
+                m_MemBlocks[buddyPairPow].pop (rightBuddy );
+                m_MemBlocks[buddyPairPow].pop (leftBuddy );
+                createBlock (leftBuddy, ++buddyPairPow );
+                return true;
+        }
+        return false;
+    }
+
+    void mergeBlock ( uintptr_t * block ) {
+        /**
+        * Recursions stops in mergeBuddies where the sizes will mismatch.
+        */
+        size_t blockSize = block[0];
+        if ( ( ( block - m_Begin ) * sizeof(uintptr_t) / blockSize  ) % 2 == 0) {  // given block is left buddy
+            uintptr_t * rightBuddy = block + blockSize / sizeof(uintptr_t);
+            if ( mergeBuddies ( block, rightBuddy ) )
+                mergeBlock ( block );
+        }
+        else { // given block is right buddy
+            uintptr_t * leftBuddy = block - blockSize / sizeof(uintptr_t);
+            if ( mergeBuddies ( leftBuddy, block ) )
+                mergeBlock ( leftBuddy );
+        }
+    }
+
+    void setFreeBlock ( uintptr_t * block ) {
+        auto blockSizePow = (size_t) log2 ( block[0] & ~1 );
+        createBlock ( block, blockSizePow );
+    }
+
+    bool free ( uintptr_t * block ) {
+        if ( ! block )
+            return false;
+        block--; // move ptr to start of block header
+        if ( ! exists ( block ) )
+            return false;
+        if ( ! (block[0] & 1) ) // block is free already
+            return false;
+        setFreeBlock ( block );
+        mergeBlock ( block );
+        m_AllocatedCnt--;
+        return true;
+    }
 };
 
 CHeap heap;
@@ -156,18 +242,37 @@ CHeap heap;
 void   HeapInit    ( void * memPool, int memSize ) {
   heap = CHeap ( ( uintptr_t * ) memPool, memSize );
   heap.init();
+//#ifndef __PROGTEST__
+//  cout << "Init" << endl;
+//  heap.printBlocks();
+//#endif
 }
 void * HeapAlloc   ( int    size ) {
-  return (void *) heap.alloc(size);
+    auto ret = (void *) heap.alloc(size);
+//#ifndef __PROGTEST__
+//  cout << "Alloc " << size << endl;
+//  heap.printBlocks();
+//#endif
+  return ret;
 }
 bool   HeapFree    ( void * blk ) {
-  /* todo */
+  auto ret = heap.free ( (uintptr_t *) blk );
+//#ifndef __PROGTEST__
+//  cout << "Free " << blk << endl;
+//  heap.printBlocks();
+//#endif
+    return ret;
 }
 void   HeapDone    ( int  * pendingBlk ) {
     *pendingBlk = heap.done();
+//#ifndef __PROGTEST__
+//    cout << "Done" << endl;
+//    heap.printBlocks();
+//#endif
 }
 
 #ifndef __PROGTEST__
+
 int main ( void )
 {
   uint8_t       * p0, *p1, *p2, *p3, *p4;
@@ -181,6 +286,11 @@ int main ( void )
   memset ( p1, 0, 511000 );
   assert ( ( p2 = (uint8_t*) HeapAlloc ( 26000 ) ) != NULL );
   memset ( p2, 0, 26000 );
+
+  assert (HeapFree(p1+1) == false );
+  assert (HeapFree(p1-1) == false );
+  assert (HeapFree(p0-1) == false );
+
   HeapDone ( &pendingBlk );
   assert ( pendingBlk == 3 );
 
@@ -231,7 +341,6 @@ int main ( void )
   assert ( ! HeapFree ( p0 + 1000 ) );
   HeapDone ( &pendingBlk );
   assert ( pendingBlk == 1 );
-
 
   return 0;
 }
