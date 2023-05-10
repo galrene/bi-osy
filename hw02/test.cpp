@@ -223,8 +223,6 @@ public:
     }
 
     bool free ( uintptr_t * block ) {
-        if ( ! block )
-            return false;
         block--; // move ptr to start of block header
         if ( ! exists ( block ) )
             return false;
@@ -240,11 +238,13 @@ public:
 CHeap heap;
 
 void   HeapInit    ( void * memPool, int memSize ) {
-  heap = CHeap ( ( uintptr_t * ) memPool, memSize );
-  heap.init();
+    if ( ! memPool || memSize <= 0 )
+        return;
+    heap = CHeap ( ( uintptr_t * ) memPool, memSize );
+    heap.init();
 #ifndef __PROGTEST__
-  cout << "Init" << endl;
-  heap.printBlocks();
+    cout << "Init" << endl;
+    heap.printBlocks();
 #endif
 }
 void * HeapAlloc   ( int    size ) {
@@ -252,20 +252,24 @@ void * HeapAlloc   ( int    size ) {
         return nullptr;
     auto ret = (void *) heap.alloc(size);
 #ifndef __PROGTEST__
-  cout << "Alloc " << size << endl;
-  heap.printBlocks();
+    cout << "Alloc " << size << endl;
+    heap.printBlocks();
 #endif
-  return ret;
+    return ret;
 }
 bool   HeapFree    ( void * blk ) {
-  auto ret = heap.free ( (uintptr_t *) blk );
+    if ( ! blk )
+        return false;
+    auto ret = heap.free ( (uintptr_t *) blk );
 #ifndef __PROGTEST__
-  cout << "Free " << blk << endl;
-  heap.printBlocks();
+    cout << "Free " << blk << endl;
+    heap.printBlocks();
 #endif
     return ret;
 }
 void   HeapDone    ( int  * pendingBlk ) {
+    if ( ! pendingBlk )
+        return;
     *pendingBlk = heap.done();
 #ifndef __PROGTEST__
     cout << "Done" << endl;
@@ -344,6 +348,7 @@ int main ( void )
   HeapDone ( &pendingBlk );
   assert ( pendingBlk == 1 );
 
+
   HeapInit ( memPool, 3072 );
   assert ( ( p0 = (uint8_t*) HeapAlloc ( 1000 ) ) != NULL );
   assert ( ( p1 = (uint8_t*) HeapAlloc ( 1000 ) ) != NULL );
@@ -351,7 +356,8 @@ int main ( void )
 
   assert ( HeapFree ( p0 ) );
   assert ( HeapFree ( p1 ) );
-
+  HeapDone ( &pendingBlk );
+  assert ( pendingBlk == 1 );
   return 0;
 }
 #endif /* __PROGTEST__ */
