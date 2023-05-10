@@ -177,12 +177,9 @@ public:
     }
 
     bool exists ( uintptr_t * block ) {
-        uintptr_t * currPos = m_Begin;
-        if ( block < m_Begin || block > (m_Begin + m_Size / sizeof(uintptr_t)) )
-            return false;
-        while ( currPos < block )
-            currPos += (currPos[0] & ~1) / sizeof(uintptr_t); // ignore free/allocated bit
-        return currPos == block;
+        if ( block < (m_Begin + m_Size / sizeof(uintptr_t)) )
+            return true;
+        return false;
     }
 
     bool mergeBuddies ( uintptr_t * leftBuddy, uintptr_t * rightBuddy ) {
