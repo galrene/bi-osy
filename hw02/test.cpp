@@ -72,15 +72,15 @@ private:
     int m_Size;
     int m_AllocatedCnt; // number of allocated blocks
     /**
-     * Split a given memory block into blocks of sizes in powers of 2
+     * Split the given memory block into blocks of sizes in powers of 2 (32B smallest because of free block design)
      * @param size size of memory block to split
      */
     void splitMemSpace ( int size ) {
         uintptr_t * currPos = m_Begin;
-        for ( int i = (sizeof(int)*8)-1; i >= 0 && size; i-- ) {
+        for ( int i = (sizeof(int)*8)-1; i >= 5 && size; i-- ) {
             if ( size & 0x80000000 ) {
                 createBlock (currPos, i );
-                int blockSize = 1 << (i-3);
+                int blockSize = 1 << (i-3); // blocksSize of uintptr_ts
                 currPos += blockSize;
             }
             size <<= 1;
@@ -202,7 +202,7 @@ public:
 
     void mergeBlock ( uintptr_t * block ) {
         /**
-        * Recursions stops in mergeBuddies where the sizes will mismatch.
+        * Recursion stops in mergeBuddies where the sizes will mismatch.
         */
         size_t blockSize = block[0];
         if ( ( ( block - m_Begin ) * sizeof(uintptr_t) / blockSize  ) % 2 == 0) {  // given block is left buddy
@@ -211,7 +211,7 @@ public:
                 mergeBlock ( block );
         }
         else { // given block is right buddy
-            uintptr_t * leftBuddy = block - blockSize / sizeof(uintptr_t);
+            uintptr_t * leftBuddy = block - blockSize / sizeof(uintptr_t); // TODO: use block[-1]
             if ( mergeBuddies ( leftBuddy, block ) )
                 mergeBlock ( leftBuddy );
         }
