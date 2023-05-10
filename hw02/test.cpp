@@ -8,18 +8,10 @@
 using namespace std;
 #endif /* __PROGTEST__ */
 
+#define ALLOC_MEMORY_RANGE 32
 
 /**
- * A memory block.
- *
- * Free block in memory consists of: 4 * uintptr_8 = 32B
- * [BLOCK_SIZE][PREVIOUS_BLOCK_PTR][NEXT_BLOCK_PTR][BLOCK_SIZE]
- * where last bit of size is allocated flag
- */
-
-
-/**
- * Bidirectional for memory blocks.
+ * Bidirectional LL for memory blocks.
  */
 class CBiLL {
 private:
@@ -37,10 +29,15 @@ public:
         m_Front = item;
         m_Front[2] = (uintptr_t) prevFront;
     }
+
+    uintptr_t * front () { return m_Front; }
+
+    uintptr_t * popFront () { pop (m_Front); return m_Front; }
+
     void pop ( uintptr_t * item ) {
         auto prev = (uintptr_t *) item[1];
         auto next = (uintptr_t *) item[2];
-        // the case of a single item in the LL
+        // the case of a single item in the LL - set front to nullptr
         if ( item == m_Front )
             m_Front = next;
         if ( prev )
@@ -49,49 +46,114 @@ public:
             next[1] = (uintptr_t) prev;
     }
 };
-
+/**
+ * Free block in memory consists of:
+ * [BLOCK_SIZE][PREVIOUS_BLOCK_PTR][NEXT_BLOCK_PTR][BLOCK_SIZE]
+ * where last bit of size is allocated flag
+ */
 class CHeap {
 private:
     /* Linked lists of sizes 2^i */
-    CBiLL * m_MemBlocks[32] = {};
+    CBiLL * m_MemBlocks[ALLOC_MEMORY_RANGE] = {};
     uintptr_t * m_Begin;
     int m_Size;
     size_t m_AllocatedCnt; // number of allocated blocks
     /**
-     * Split a number into powers of two.
+     * Split a given memory block into blocks of sizes in powers of 2
+     * @param size size of memory block to split
      */
-    void split ( int n ) {
+    void splitMemSpace ( int size ) {
         uintptr_t * currPos = m_Begin;
-        for ( size_t i = 0; n > 0; i++ ) {
-            if ( n & 1 ) {
+        for ( size_t i = 0; size > 0; i++ ) {
+            if ( size & 1 ) {
                 createBlock (currPos, i );
                 currPos += 1 << i;
             }
-            n >>= 1;
+            size >>= 1;
         }
     }
+    /**
+     * Create memory block at address of 2^i size and push it into a corresponding linked list.
+     * @param address where to create the block
+     * @param i 2's power in the size of the block to create
+     */
     void createBlock ( uintptr_t * address, size_t i ) {
-        address[0] = 1 << i;
+        size_t size = 1 << i;
+        address[0] = size;
         address[1] = 0;
         address[2] = 0;
-        address[ ( (1 << i) / 8 ) - 1] = (1 << i); // uintptr_t = 8B, size is in Bytes
+        address[ size / 8  - 1] = size; // uintptr_t * address = 8B, size is in bytes
         m_MemBlocks[i]->pushFront ( address );
     }
 
 public:
+    CHeap () = default;
     CHeap ( uintptr_t * begin, int size )
     : m_Begin ( begin ), m_Size ( size ), m_AllocatedCnt ( 0 ) {}
 
     void init () {
-        // TODO: check size and begin ptr validity
+        splitMemSpace (m_Size );
+    }
+    /**
+     * Splits block at given index until one with required size is created.
+     * Returns pointer to the resulting block of required size.
+     * @param requiredSizePow 2's power (index) of the size of the required block size
+     * @param blockToSplitPow 2's power (index) of the size of the given block
+     */
+    uintptr_t * splitBlock ( size_t blockToSplitPow, size_t requiredSizePow ) {
+        uintptr_t * blockToSplit = nullptr;
+        /*      currBlockSize   != requiredBlockSize */
+        while ( blockToSplitPow != requiredSizePow ) {
+            blockToSplit = m_MemBlocks[blockToSplitPow]->popFront();
+
+            size_t newBlockIndex = blockToSplitPow - 1;
+            size_t newBlockSize = 1 << newBlockIndex;
+
+            createBlock ( blockToSplit, newBlockIndex );
+            createBlock ( blockToSplit + newBlockSize, newBlockIndex );
+            blockToSplitPow--;
+        }
+        return blockToSplit;
+    }
+    /**
+     * Sets block at index as allocated in memory.
+     * @param block where to allocate block
+     * @param blockIndex 2's power of the block size
+     * @return address to block of allocated memory
+     */
+    uintptr_t * allocBlock ( uintptr_t * block, size_t blockIndex ) {
+        size_t blockSize = 1 << blockIndex;
+        block[0] |= 1; // mark block as allocated
+        block[ blockSize / 8 - 1] |= 1;
+        m_AllocatedCnt++;
+        return block + 1;
+    }
+
+    uintptr_t * alloc ( size_t size ) {
+        size_t sizeWithHeader = size + (2 * sizeof (size_t)); // requested memory + header info
+        int neededBlockIndex = ceil (log2(sizeWithHeader ) ); // exact power of 2 or the next biggest
+
+        // memory block of the needed size exists
+        if ( ! m_MemBlocks[neededBlockIndex]->empty() )
+            return allocBlock ( m_MemBlocks[neededBlockIndex]->popFront(), neededBlockIndex );
+
+        // find next biggest block
+        for ( size_t i = neededBlockIndex; i < ALLOC_MEMORY_RANGE; i++ ) {
+            if ( ! m_MemBlocks[i]->empty() )
+                return allocBlock ( splitBlock ( i, neededBlockIndex ), neededBlockIndex );
+        }
+        return nullptr;
     }
 };
 
+CHeap heap;
+
 void   HeapInit    ( void * memPool, int memSize ) {
-  /* todo */
+  heap = CHeap ( ( uintptr_t * ) memPool, memSize );
+  heap.init();
 }
 void * HeapAlloc   ( int    size ) {
-  /* todo */
+  return (void *) heap.alloc(size);
 }
 bool   HeapFree    ( void * blk ) {
   /* todo */
