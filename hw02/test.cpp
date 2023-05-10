@@ -15,9 +15,11 @@ using namespace std;
  */
 class CBiLL {
 private:
-    uintptr_t * m_Front = nullptr;
+    uintptr_t * m_Front;
 public:
     bool empty () { return m_Front == nullptr; }
+    CBiLL ()
+    : m_Front ( nullptr ) {}
 
     void pushFront ( uintptr_t * item ) {
         if ( ! m_Front ) {
@@ -32,7 +34,7 @@ public:
 
     uintptr_t * front () { return m_Front; }
 
-    uintptr_t * popFront () { pop (m_Front); return m_Front; }
+    uintptr_t * popFront () { auto front = m_Front; pop (m_Front); return front; }
 
     void pop ( uintptr_t * item ) {
         auto prev = (uintptr_t *) item[1];
@@ -54,10 +56,10 @@ public:
 class CHeap {
 private:
     /* Linked lists of sizes 2^i */
-    CBiLL * m_MemBlocks[ALLOC_MEMORY_RANGE] = {};
+    CBiLL m_MemBlocks[ALLOC_MEMORY_RANGE] = {};
     uintptr_t * m_Begin;
     int m_Size;
-    size_t m_AllocatedCnt; // number of allocated blocks
+    int m_AllocatedCnt; // number of allocated blocks
     /**
      * Split a given memory block into blocks of sizes in powers of 2
      * @param size size of memory block to split
@@ -67,7 +69,8 @@ private:
         for ( size_t i = 0; size > 0; i++ ) {
             if ( size & 1 ) {
                 createBlock (currPos, i );
-                currPos += 1 << i;
+                int blockSize =  1 << (i-3); // in uintptr_ts, not bytes (therefore divided by 8)
+                currPos += blockSize;
             }
             size >>= 1;
         }
@@ -82,8 +85,8 @@ private:
         address[0] = size;
         address[1] = 0;
         address[2] = 0;
-        address[ size / 8  - 1] = size; // uintptr_t * address = 8B, size is in bytes
-        m_MemBlocks[i]->pushFront ( address );
+        address[ size / sizeof(uintptr_t)  - 1] = size; // uintptr_t * address = 8B, size is in bytes
+        m_MemBlocks[i].pushFront ( address );
     }
 
 public:
@@ -94,6 +97,8 @@ public:
     void init () {
         splitMemSpace (m_Size );
     }
+    int done () { return m_AllocatedCnt; }
+
     /**
      * Splits block at given index until one with required size is created.
      * Returns pointer to the resulting block of required size.
@@ -104,13 +109,13 @@ public:
         uintptr_t * blockToSplit = nullptr;
         /*      currBlockSize   != requiredBlockSize */
         while ( blockToSplitPow != requiredSizePow ) {
-            blockToSplit = m_MemBlocks[blockToSplitPow]->popFront();
+            blockToSplit = m_MemBlocks[blockToSplitPow].popFront();
 
             size_t newBlockIndex = blockToSplitPow - 1;
             size_t newBlockSize = 1 << newBlockIndex;
 
             createBlock ( blockToSplit, newBlockIndex );
-            createBlock ( blockToSplit + newBlockSize, newBlockIndex );
+            createBlock ( blockToSplit + (newBlockSize / sizeof (uintptr_t)), newBlockIndex );
             blockToSplitPow--;
         }
         return blockToSplit;
@@ -124,7 +129,7 @@ public:
     uintptr_t * allocBlock ( uintptr_t * block, size_t blockIndex ) {
         size_t blockSize = 1 << blockIndex;
         block[0] |= 1; // mark block as allocated
-        block[ blockSize / 8 - 1] |= 1;
+        block[ blockSize / sizeof(uintptr_t) - 1] |= 1;
         m_AllocatedCnt++;
         return block + 1;
     }
@@ -134,12 +139,12 @@ public:
         int neededBlockIndex = ceil (log2(sizeWithHeader ) ); // exact power of 2 or the next biggest
 
         // memory block of the needed size exists
-        if ( ! m_MemBlocks[neededBlockIndex]->empty() )
-            return allocBlock ( m_MemBlocks[neededBlockIndex]->popFront(), neededBlockIndex );
+        if ( ! m_MemBlocks[neededBlockIndex].empty() )
+            return allocBlock ( m_MemBlocks[neededBlockIndex].popFront(), neededBlockIndex );
 
         // find next biggest block
         for ( size_t i = neededBlockIndex; i < ALLOC_MEMORY_RANGE; i++ ) {
-            if ( ! m_MemBlocks[i]->empty() )
+            if ( ! m_MemBlocks[i].empty() )
                 return allocBlock ( splitBlock ( i, neededBlockIndex ), neededBlockIndex );
         }
         return nullptr;
@@ -159,7 +164,7 @@ bool   HeapFree    ( void * blk ) {
   /* todo */
 }
 void   HeapDone    ( int  * pendingBlk ) {
-  /* todo */
+    *pendingBlk = heap.done();
 }
 
 #ifndef __PROGTEST__
