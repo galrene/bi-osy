@@ -77,13 +77,13 @@ private:
      */
     void splitMemSpace ( int size ) {
         uintptr_t * currPos = m_Begin;
-        for ( size_t i = 0; size > 0; i++ ) {
-            if ( size & 1 ) {
+        for ( int i = (sizeof(int)*8)-1; i >= 0 && size; i-- ) {
+            if ( size & 0x80000000 ) {
                 createBlock (currPos, i );
-                int blockSize =  1 << (i-3); // in uintptr_ts, not bytes (therefore divided by 8)
+                int blockSize = 1 << (i-3);
                 currPos += blockSize;
             }
-            size >>= 1;
+            size <<= 1;
         }
     }
     /**
@@ -242,33 +242,35 @@ CHeap heap;
 void   HeapInit    ( void * memPool, int memSize ) {
   heap = CHeap ( ( uintptr_t * ) memPool, memSize );
   heap.init();
-//#ifndef __PROGTEST__
-//  cout << "Init" << endl;
-//  heap.printBlocks();
-//#endif
+#ifndef __PROGTEST__
+  cout << "Init" << endl;
+  heap.printBlocks();
+#endif
 }
 void * HeapAlloc   ( int    size ) {
+    if ( size <= 0 )
+        return nullptr;
     auto ret = (void *) heap.alloc(size);
-//#ifndef __PROGTEST__
-//  cout << "Alloc " << size << endl;
-//  heap.printBlocks();
-//#endif
+#ifndef __PROGTEST__
+  cout << "Alloc " << size << endl;
+  heap.printBlocks();
+#endif
   return ret;
 }
 bool   HeapFree    ( void * blk ) {
   auto ret = heap.free ( (uintptr_t *) blk );
-//#ifndef __PROGTEST__
-//  cout << "Free " << blk << endl;
-//  heap.printBlocks();
-//#endif
+#ifndef __PROGTEST__
+  cout << "Free " << blk << endl;
+  heap.printBlocks();
+#endif
     return ret;
 }
 void   HeapDone    ( int  * pendingBlk ) {
     *pendingBlk = heap.done();
-//#ifndef __PROGTEST__
-//    cout << "Done" << endl;
-//    heap.printBlocks();
-//#endif
+#ifndef __PROGTEST__
+    cout << "Done" << endl;
+    heap.printBlocks();
+#endif
 }
 
 #ifndef __PROGTEST__
@@ -341,6 +343,14 @@ int main ( void )
   assert ( ! HeapFree ( p0 + 1000 ) );
   HeapDone ( &pendingBlk );
   assert ( pendingBlk == 1 );
+
+  HeapInit ( memPool, 3072 );
+  assert ( ( p0 = (uint8_t*) HeapAlloc ( 1000 ) ) != NULL );
+  assert ( ( p1 = (uint8_t*) HeapAlloc ( 1000 ) ) != NULL );
+  assert ( ( p2 = (uint8_t*) HeapAlloc ( 1000 ) ) != NULL );
+
+  assert ( HeapFree ( p0 ) );
+  assert ( HeapFree ( p1 ) );
 
   return 0;
 }
